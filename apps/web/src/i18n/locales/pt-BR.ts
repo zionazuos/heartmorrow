@@ -67,6 +67,104 @@ export const ptBR: Record<MessageKey, string> = {
   'common.saving': 'Salvando…',
   'common.off': 'Desligado',
   'common.enabling': 'Ativando…',
+  'common.back': 'Voltar',
+  'common.continue': 'Continuar',
+  'common.you': 'Você',
+
+  // --- World selector ------------------------------------------------------
+  'world.select.eyebrow': 'Um almanaque do coração à luz de lampião',
+  'world.select.title': 'Escolha um mundo',
+  'world.select.sub':
+    'Cada mundo é a sua própria história — suas próprias pessoas, seu próprio calendário, o seu próprio eu. Entre em um para começar e volte aqui quando quiser para trocar.',
+  'world.select.newTitle': 'Começar um novo mundo',
+  'world.select.newSub': 'Monte uma nova história e persona',
+  'world.select.empty': 'Seu almanaque está vazio. Comece o seu primeiro mundo acima.',
+  'world.delete.kicker': 'Excluir mundo',
+  'world.delete.title': 'Excluir {name}?',
+  'world.delete.body':
+    'Isto remove permanentemente o mundo e tudo nele — suas pessoas, seus relacionamentos, dinheiro, mensagens e histórico. Não pode ser desfeito.',
+  'world.delete.confirm': 'Excluir para sempre',
+  'world.card.current': 'Jogando agora',
+  'world.card.day': 'Dia',
+  'world.card.people': 'Pessoas',
+  'world.card.inCircle': 'no seu círculo',
+  'world.card.phone': 'Celular',
+  'world.card.unread': 'não lidas',
+  'world.card.continue': 'Continuar',
+  'world.card.enter': 'Entrar',
+  'world.card.deleteWorld': 'Excluir mundo',
+
+  // --- New-world onboarding ------------------------------------------------
+  'world.onb.stepLabel': 'Novo mundo · passo {step} de 4',
+  'world.onb.welcomeTitle': 'Bem-vindo a {name}',
+  'world.onb.yourWorldFallback': 'seu mundo',
+  'world.onb.step1Title': 'Defina o cenário',
+  'world.onb.step2Title': 'Quem é você aqui?',
+  'world.onb.step3Title': 'Traga pessoas',
+  'world.onb.step4Title': 'Como funciona',
+  'world.onb.errNameRequired': 'Dê um nome ao seu mundo para continuar.',
+  'world.onb.errChooseSource': 'Escolha um mundo de partida.',
+  'world.onb.modeFreshTitle': 'Um mundo novo',
+  'world.onb.modeFreshSub': 'Comece de uma página em branco',
+  'world.onb.modeCloneTitle': 'Começar de um save',
+  'world.onb.modeCloneSub': 'Copie um mundo existente e seu elenco',
+  'world.onb.cloneFlavor':
+    'Escolha um mundo para copiar. Seu cenário, história e as pessoas nele são duplicados em um save novinho — seu dinheiro, relacionamentos e histórico começam do zero.',
+  'world.onb.cloneNameLabel': 'Dê um nome ao seu novo save',
+  'world.onb.cloneNamePlaceholder': 'ex.: O Bairro Lúmen — segunda tentativa',
+  'world.onb.blankFlavor':
+    'Um mundo é o palco onde a sua história acontece — uma cidade, uma estação, um clima. Você pode detalhar sua história, locais e pessoas depois; por ora, só dê um nome e um sentimento a ele.',
+  'world.onb.nameLabel': 'Nome do mundo',
+  'world.onb.namePlaceholder': 'ex.: O Bairro Lúmen',
+  'world.onb.summaryLabel': 'Um resumo de uma linha',
+  'world.onb.summaryHint': 'Opcional — que tipo de lugar é este?',
+  'world.onb.summaryPlaceholder': 'Um aconchegante distrito das artes onde vizinhos viram algo mais.',
+  'world.onb.toneLabel': 'Tom',
+  'world.onb.toneHint': 'Opcional — a chave emocional da história.',
+  'world.onb.tonePlaceholder': 'Romance caloroso, esperançoso, guiado pelos personagens.',
+  'world.onb.creating': 'Criando…',
+  'world.onb.personaFlavor':
+    'Este é um recomeço — um você à parte, com seu próprio dinheiro, lembranças e histórico neste mundo. Conte quem você é aqui.',
+  'world.onb.yourName': 'Seu nome',
+  'world.onb.yourNamePlaceholder': 'Como as pessoas devem te chamar?',
+  'world.onb.pronouns': 'Pronomes',
+  'world.onb.gender': 'Gênero',
+  'world.onb.genderHint': 'Separado dos pronomes.',
+  'world.onb.sexuality': 'Sexualidade',
+  'world.onb.sexualityHint':
+    'Define com quais personagens um romance pode se aprofundar. Deixe sem especificar para namorar livremente.',
+  'world.onb.aboutYou': 'Um pouco sobre você',
+  'world.onb.aboutYouHint': 'Opcional — uma ou duas frases que as pessoas com quem você sair vão perceber sobre você.',
+  'world.onb.aboutYouPlaceholder':
+    'Um engenheiro de som que acabou de se mudar para a cidade. Bom ouvinte; péssimo em ficar parado.',
+  'world.onb.importFlavor':
+    'Conhece alguém de outro mundo que gostaria de reencontrar? Copie-o como um rosto novo — um recomeço, sem histórico anterior. Pule isto e o seu mundo permanece como está.',
+  'world.onb.importEmpty':
+    'Você ainda não tem ninguém em outros mundos para importar. Avance — você sempre pode criar pessoas depois de entrar.',
+  'world.onb.importFrom': 'De {world}',
+  'world.onb.anotherWorld': 'Outro mundo',
+  'world.onb.importing': 'Importando…',
+  'world.onb.importContinue': 'Importar {count} e continuar',
+  'world.onb.skip': 'Pular',
+  'world.onb.welcomeFlavor': 'As luzes estão acesas, {persona}. {summary} Veja como é um dia antes de você entrar:',
+  'world.onb.defaultSummary': 'Um novo capítulo é seu para escrever.',
+  'world.onb.howto.dates':
+    'Passe os seus dias conhecendo pessoas — encontros e atividades em conjunto custam um pouco de energia.',
+  'world.onb.howto.people':
+    'Converse, e eles lembram. Os relacionamentos esquentam ou esfriam com o tempo, e se afastam se você os negligenciar.',
+  'world.onb.howto.phone':
+    'Seu celular guarda mensagens, e-mails e um feed social vivo que segue em movimento conforme os dias passam.',
+  'world.onb.howto.shop':
+    'Compre presentes e lembranças na loja — seu dinheiro e sua bolsa são só seus neste mundo.',
+  'world.onb.howto.recap':
+    'Quando a sua energia acabar, encerre o dia para descansar, avançar o tempo e ver o que aconteceu pela cidade.',
+  'world.onb.howto.worlds':
+    'Troque de mundo quando quiser pelo seletor — cada um é uma história e um save totalmente separados.',
+  'world.onb.meetHead': 'As pessoas que você pode conhecer',
+  'world.onb.blankCast': 'Este mundo é uma página em branco — ninguém mora aqui ainda. ',
+  'world.onb.blankCastCreator': 'Assim que entrar, vá em Pessoas para criar os personagens que o chamam de lar.',
+  'world.onb.blankCastPlay': 'Ative o modo Criador nos Ajustes do celular para povoá-lo com pessoas para conhecer.',
+  'world.onb.enter': 'Entrar em {name}',
 
   // --- Settings → Language -------------------------------------------------
   'settings.language.kicker': 'Exibição',
