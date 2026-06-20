@@ -235,6 +235,36 @@ The Vite dev server proxies `/api` and `/uploads` to the API server on
 
 ---
 
+## Self-hosting it as a web server
+
+`pnpm dev` runs the two dev servers (Vite + API) and is meant for your own machine. To host
+Heartmorrow as a normal web app — e.g. in a Docker container or a **Proxmox LXC** so you can
+reach it from other devices on your network — build it once and run the API server alone: it
+**serves the built web client itself**, so the whole app is a single process on a single port.
+
+```bash
+# 1. Build the shared package, type-check the server, and bundle the web client
+pnpm build
+
+# 2. Bind to all interfaces so the LAN can reach it (or set HOST in .env)
+HOST=0.0.0.0 pnpm --filter @dsim/server run start
+```
+
+Then open **http://<host-ip>:8787** — both the UI and the API are served there. When
+`apps/web/dist` exists (after `pnpm build`) the server serves it automatically, with an
+SPA deep-link fallback so a hard refresh on any route works; in dev the folder is absent, so
+this is a no-op and Vite serves the client instead.
+
+> ⚠️ **No authentication.** Heartmorrow is a single-user, local-first game with no login. On
+> a trusted LAN that's fine, but **do not expose it directly to the internet** — put it
+> behind a reverse proxy with authentication (e.g. Caddy/Authelia) if you need remote access.
+
+Relevant settings (see `.env.example`): `HOST=0.0.0.0`, `PORT`, a persistent `DATA_DIR`,
+and `WEB_DIR` / `SERVE_WEB=0` to override or disable serving the bundled client. Point
+`LLM_BASE_URL` at an endpoint the container can reach.
+
+---
+
 ## Connecting your model
 
 Heartmorrow works with any endpoint that speaks the OpenAI Chat Completions API. Common
@@ -255,6 +285,26 @@ server-side and are never sent to the browser.
 > **2048+ max tokens** — or structured steps may run out mid-response.
 
 In the future, more API-schemes will be supported.
+
+---
+
+## Languages & localization
+
+Heartmorrow has two independent language settings:
+
+- **Interface language** — the app's own text (menus, buttons, labels). Pick it in
+  **Settings → Language**; it's stored per-browser and applies instantly. English and
+  **Brazilian Portuguese (pt-BR)** ship today.
+- **Character reply language** — the language the *model* writes in (dialogue, narration,
+  texts). Set it in **Settings → Connection console → Character reply language**:
+  `Auto` (follow whatever you type), `English`, or `Português (Brasil)`. A fixed choice
+  injects a high-priority instruction into the prompt so the cast replies in that language
+  regardless of what you type. You can also seed the default with `LLM_RESPONSE_LANGUAGE` in
+  `.env`. Works best with a capable model; small models may occasionally slip back.
+
+Adding a language is mostly a translation file: copy `apps/web/src/i18n/locales/en.ts`, fill
+in the strings, and register it in `apps/web/src/i18n/index.tsx`. TypeScript flags any key a
+locale is missing, so a translation can't silently fall out of sync.
 
 ---
 
@@ -345,10 +395,12 @@ row. See [`.env.example`](.env.example) for the annotated full list.
 ```dotenv
 # Server
 PORT=8787
-HOST=127.0.0.1
+HOST=127.0.0.1                   # use 0.0.0.0 to self-host on your LAN
 DATA_DIR=./data
 UPLOADS_DIR=./data/uploads
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+# WEB_DIR=                       # override the built client dir (default apps/web/dist)
+# SERVE_WEB=0                    # don't serve the bundled SPA even if dist/ exists (API only)
 
 # Default LLM provider (seeds the initial settings row only)
 LLM_BASE_URL=http://localhost:1234/v1
@@ -360,6 +412,7 @@ LLM_MAX_TOKENS=2048              # reasoning models need plenty of room
 LLM_STRUCTURED_MODE=json_schema  # json_schema | json_object | prompt_only
 LLM_ENDPOINT_MODE=chat_completions
 LLM_MAX_RETRIES=3
+LLM_RESPONSE_LANGUAGE=auto       # auto | en | pt-BR — language the model replies in
 
 # Web (Vite dev proxy target)
 VITE_API_PROXY_TARGET=http://127.0.0.1:8787
@@ -376,6 +429,8 @@ Your save lives in `DATA_DIR/dsim.sqlite` and uploaded art in `UPLOADS_DIR` (bot
 - **Add art** → [docs/ADDING_ART.md](docs/ADDING_ART.md)
 - **Add a minigame** → [docs/ADDING_MINIGAMES.md](docs/ADDING_MINIGAMES.md)
 - **Add a shop item** → [docs/ADDING_SHOP_ITEMS.md](docs/ADDING_SHOP_ITEMS.md)
+- **Add a UI language** → copy `apps/web/src/i18n/locales/en.ts`, translate the strings, and
+  register the locale in `apps/web/src/i18n/index.tsx` (see [Languages & localization](#languages--localization))
 
 The character and world editors can also ask the LLM to draft a profile, roll a set of
 dating stats, or build a whole character from a portrait — so you can go from idea to
@@ -388,7 +443,7 @@ dateable character in a couple of clicks.
 ```
 packages/shared   Zod schemas, game types, stat defs, LLM/minigame/item contracts
 apps/server       Fastify API, LLM adapters + structured caller, SQLite, game logic
-apps/web          Vite + React client (responsive)
+apps/web          Vite + React client (responsive); UI translations in src/i18n
 docs              Architecture + how-to guides
 data/             Local SQLite DB + uploads (gitignored, created at runtime)
 ```

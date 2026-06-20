@@ -63,6 +63,7 @@ function buildEnvLlmDefaults(): LlmSettings {
     structuredMode: process.env.LLM_STRUCTURED_MODE,
     endpointMode: process.env.LLM_ENDPOINT_MODE,
     maxRetries: process.env.LLM_MAX_RETRIES ? Number(process.env.LLM_MAX_RETRIES) : undefined,
+    responseLanguage: process.env.LLM_RESPONSE_LANGUAGE,
   };
   // Drop undefined keys so schema defaults take over.
   const cleaned = Object.fromEntries(
