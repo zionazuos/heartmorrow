@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   DATING_STAT_KEYS,
-  DATING_STAT_LABELS,
   DEFAULT_DATING_STATS,
   GUARDEDNESS_DEFAULT,
   guardednessDescriptor,
@@ -15,7 +14,6 @@ import {
   EXPRESSION_LABELS,
   DAYS_OF_WEEK,
   WEATHER_KINDS,
-  WEATHER_LABELS,
   WEATHER_ICONS,
   type Character,
   type CharacterLink,
@@ -35,6 +33,15 @@ import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
 import { useT } from '../i18n';
 import type { MessageKey } from '../i18n/locales/en';
+import {
+  genderLabel,
+  sexualityLabel,
+  relStyleLabel,
+  linkLabel,
+  datingStatLabel,
+  weatherLabel as weatherLabelTr,
+  dayLabel,
+} from '../i18n/sharedLabels';
 import { Banner, ConfirmDialog, Field, TagInput } from '../components/ui';
 import { AssetPicker } from '../components/AssetPicker';
 import { RelationshipBars } from '../components/StatBars';
@@ -586,18 +593,18 @@ export function CharacterEditor() {
                 <div className="inline-fields">
                   <Field label={t('editor.field.gender')} hint={t('editor.field.genderHint')}>
                     <select value={form.gender} onChange={(e) => set('gender', e.target.value as Gender)}>
-                      {Object.entries(GENDER_LABELS).map(([k, label]) => (
+                      {Object.keys(GENDER_LABELS).map((k) => (
                         <option key={k} value={k}>
-                          {label}
+                          {genderLabel(t, k)}
                         </option>
                       ))}
                     </select>
                   </Field>
                   <Field label={t('editor.field.sexuality')} hint={t('editor.field.sexualityHint')}>
                     <select value={form.sexuality} onChange={(e) => set('sexuality', e.target.value as Sexuality)}>
-                      {Object.entries(SEXUALITY_LABELS).map(([k, label]) => (
+                      {Object.keys(SEXUALITY_LABELS).map((k) => (
                         <option key={k} value={k}>
-                          {label}
+                          {sexualityLabel(t, k)}
                         </option>
                       ))}
                     </select>
@@ -620,7 +627,7 @@ export function CharacterEditor() {
                   >
                     {(Object.keys(RELATIONSHIP_STYLE_LABELS) as RelationshipStyle[]).map((k) => (
                       <option key={k} value={k}>
-                        {RELATIONSHIP_STYLE_LABELS[k]}
+                        {relStyleLabel(t, k)}
                       </option>
                     ))}
                   </select>
@@ -792,7 +799,7 @@ export function CharacterEditor() {
                   return (
                     <div className="weather-pref" key={k}>
                       <span className="flex-fill">
-                        {WEATHER_ICONS[k]} {WEATHER_LABELS[k]}
+                        {WEATHER_ICONS[k]} {weatherLabelTr(t, k)}
                       </span>
                       <button
                         className={`btn sm ${fav ? 'primary' : 'ghost'}`}
@@ -892,7 +899,7 @@ export function CharacterEditor() {
                 </button>
               </div>
               {DATING_STAT_KEYS.map((k) => (
-                <Field key={k} label={t('editor.statLine', { label: DATING_STAT_LABELS[k], value: form.datingStats[k] })}>
+                <Field key={k} label={t('editor.statLine', { label: datingStatLabel(t, k), value: form.datingStats[k] })}>
                   <input
                     type="range"
                     min={0}
@@ -947,7 +954,7 @@ export function CharacterEditor() {
                   >
                     {(Object.keys(CHARACTER_LINK_LABELS) as CharacterLinkKind[]).map((k) => (
                       <option key={k} value={k}>
-                        {CHARACTER_LINK_LABELS[k]}
+                        {linkLabel(t, k)}
                       </option>
                     ))}
                   </select>
@@ -1110,9 +1117,9 @@ export function CharacterEditor() {
                           type="button"
                           className={`btn sm ${form.employment!.workdays.includes(idx) ? 'primary' : 'ghost'}`}
                           onClick={() => toggleWorkday(idx)}
-                          title={d}
+                          title={dayLabel(t, d)}
                         >
-                          {d.slice(0, 3)}
+                          {dayLabel(t, d).slice(0, 3)}
                         </button>
                       ))}
                     </div>

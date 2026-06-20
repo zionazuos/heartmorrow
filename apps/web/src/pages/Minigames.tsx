@@ -17,13 +17,12 @@ import {
   type SweetAndSourSubmission,
   type TimingMeterSubmission,
   type TwoTruthsSubmission,
-  RELATIONSHIP_STAT_LABELS,
-  DATING_STAT_LABELS,
 } from '@dsim/shared';
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
 import { useT, type TFunc } from '../i18n';
+import { datingStatLabel, relStatLabel } from '../i18n/sharedLabels';
 import { Banner, Empty, Modal, Spinner } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { PortraitPicker } from '../components/PortraitPicker';
@@ -299,10 +298,8 @@ function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; on
   const relEntries = Object.entries(reward.relationship) as [string, number][];
   const noRewards = datingEntries.length === 0 && relEntries.length === 0 && reward.money === 0;
 
-  const statLabel = (key: string, kind: 'dating' | 'rel') => {
-    if (kind === 'rel') return RELATIONSHIP_STAT_LABELS[key as keyof typeof RELATIONSHIP_STAT_LABELS] ?? key;
-    return DATING_STAT_LABELS[key as keyof typeof DATING_STAT_LABELS] ?? key;
-  };
+  const statLabel = (key: string, kind: 'dating' | 'rel') =>
+    kind === 'rel' ? relStatLabel(t, key) : datingStatLabel(t, key);
 
   return (
     <div className="mga-result-modal">

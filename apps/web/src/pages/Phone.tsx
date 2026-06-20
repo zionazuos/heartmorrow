@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { PHASE_ICONS, PHASE_LABELS } from '@dsim/shared';
+import { PHASE_ICONS } from '@dsim/shared';
+import { phaseLabel } from '../i18n/sharedLabels';
 import { api } from '../lib/api';
 import './phone.page.css';
 import { useAppData } from '../state/app-context';
@@ -115,7 +116,7 @@ export function Phone() {
   const gridApps = ALL_APPS.filter((a) => !DOCK_IDS.includes(a.id) && featureOk(a.id));
   const dockApps = DOCK_IDS.map((id) => ALL_APPS.find((a) => a.id === id)!).filter(Boolean);
 
-  const phaseLabel = worldState ? PHASE_LABELS[worldState.phase] : t('phone.phaseFallback');
+  const phaseText = worldState ? phaseLabel(t, worldState.phase) : t('phone.phaseFallback');
   const phaseIcon = worldState ? PHASE_ICONS[worldState.phase] : '🌙';
   const batteryPct = deriveBattery(worldState?.stamina, worldState?.staminaMax);
 
@@ -126,7 +127,7 @@ export function Phone() {
           <div className="ph-status">
             <div className="ph-status-left">
               <span className="ph-status-time">{phaseIcon} {worldState ? t('dash.hud.day', { day: worldState.day }) : t('phone.status.almanac')}</span>
-              <span className="ph-status-phase">{phaseLabel}</span>
+              <span className="ph-status-phase">{phaseText}</span>
             </div>
             <div className="ph-status-right">
               <span className="ph-signal" aria-hidden="true">
@@ -148,7 +149,7 @@ export function Phone() {
               <div className={`phone-home${theme.wallpaper ? ' has-wallpaper' : ''}`}>
                 <div className="ph-home">
                   <div className="ph-greeting">
-                    <div className="ph-greeting-eyebrow">{t('phone.greetingEyebrow', { phase: phaseLabel })}</div>
+                    <div className="ph-greeting-eyebrow">{t('phone.greetingEyebrow', { phase: phaseText })}</div>
                     <h1 className="ph-greeting-title">
                       Pocket <span className="ph-amp">&</span> Lamplight
                     </h1>

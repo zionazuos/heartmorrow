@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  CHARACTER_LINK_LABELS,
   CHARACTER_LINK_ORDER,
   type Character,
   type CharacterLinkKind,
@@ -11,6 +10,7 @@ import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
 import { useT, type TFunc } from '../../i18n';
+import { linkLabel } from '../../i18n/sharedLabels';
 import { Icon, type IconName } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Portrait } from '../Portrait';
@@ -35,9 +35,9 @@ const KIND_ICON: Record<CharacterLinkKind, IconName> = {
  *  this still surfaces the full peer name when a chip truncates). */
 function tieTitle(owner: string, peer: string, kind: CharacterLinkKind, tie: SocialTie, t: TFunc): string {
   if (tie.incoming)
-    return t('social.tie.incoming', { peer, owner, label: CHARACTER_LINK_LABELS[kind].toLowerCase() });
-  if (tie.derived) return t('social.tie.derived', { peer, label: CHARACTER_LINK_LABELS[kind] });
-  return t('social.tie.plain', { peer, label: CHARACTER_LINK_LABELS[kind] });
+    return t('social.tie.incoming', { peer, owner, label: linkLabel(t, kind).toLowerCase() });
+  if (tie.derived) return t('social.tie.derived', { peer, label: linkLabel(t, kind) });
+  return t('social.tie.plain', { peer, label: linkLabel(t, kind) });
 }
 
 /** Count the web's UNIQUE connections (an unordered pair + kind), so a mutual
@@ -194,12 +194,12 @@ export function SocialApp() {
                       className={`sw-chip kind-${kind}${activeKinds.has(kind) ? '' : ' is-off'}`}
                       onClick={() => toggleKind(kind)}
                       aria-pressed={activeKinds.has(kind)}
-                      title={t('social.toggleTitle', { action: t(activeKinds.has(kind) ? 'common.hide' : 'common.show'), label: CHARACTER_LINK_LABELS[kind].toLowerCase() })}
+                      title={t('social.toggleTitle', { action: t(activeKinds.has(kind) ? 'common.hide' : 'common.show'), label: linkLabel(t, kind).toLowerCase() })}
                     >
                       <span className="sw-chip-icon">
                         <Icon name={KIND_ICON[kind]} size={14} />
                       </span>
-                      <span className="sw-chip-label">{CHARACTER_LINK_LABELS[kind]}</span>
+                      <span className="sw-chip-label">{linkLabel(t, kind)}</span>
                       <span className="sw-chip-count">{count}</span>
                     </button>
                   ))}
@@ -284,7 +284,7 @@ function PersonCard({
       <div className="sw-groups">
         {groups.map(({ kind, peers }) => (
           <div className={`sw-group kind-${kind}`} key={kind}>
-            <span className="sw-group-icon" title={CHARACTER_LINK_LABELS[kind]} aria-label={CHARACTER_LINK_LABELS[kind]}>
+            <span className="sw-group-icon" title={linkLabel(t, kind)} aria-label={linkLabel(t, kind)}>
               <Icon name={KIND_ICON[kind]} size={15} />
             </span>
             <div className="sw-peers">

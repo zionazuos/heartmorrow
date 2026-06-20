@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   RELATIONSHIP_STAT_KEYS,
-  RELATIONSHIP_STATUS_LABELS,
   currentStatus,
   isBrokenUp,
   isOnTheRocks,
@@ -11,12 +10,10 @@ import {
   bandIndex,
   deriveCalendar,
   PHASE_ICONS,
-  PHASE_LABELS,
   venueCost,
   venueTierMeta,
   availableIntents,
   isGiftableItem,
-  INTENT_LABELS,
   INTENT_ICONS,
   type Intent,
   type InventoryItem,
@@ -38,6 +35,7 @@ import { api, streamChat, assetUrl } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
 import { useT } from '../i18n';
+import { statusLabel, phaseLabel, dayLabel, seasonLabel, intentLabel } from '../i18n/sharedLabels';
 import { Portrait } from '../components/Portrait';
 import { Icon } from '../components/Icon';
 import { RelationshipBars } from '../components/StatBars';
@@ -1028,7 +1026,7 @@ export function Chat() {
           <div className="date-moment date-moment-milestone">
             <div className="date-moment-seal" aria-hidden="true">✦</div>
             <div className="date-moment-kicker">{t('chat.out.statusKicker')}</div>
-            <div className="date-moment-title">{t('chat.out.nowStatus', { status: RELATIONSHIP_STATUS_LABELS[dtrOutcome.status] })}</div>
+            <div className="date-moment-title">{t('chat.out.nowStatus', { status: statusLabel(t, dtrOutcome.status) })}</div>
           </div>
         );
       }
@@ -1079,7 +1077,7 @@ export function Chat() {
                 <span className="badge danger"><Icon name="breakup" size={12} /> {t('profile.badge.brokenUp')}</span>
               ) : (
                 <>
-                  {status !== 'none' && <span className="badge accent"><Icon name="date" size={12} /> {RELATIONSHIP_STATUS_LABELS[status]}</span>}
+                  {status !== 'none' && <span className="badge accent"><Icon name="date" size={12} /> {statusLabel(t, status)}</span>}
                   {relationship && isOnTheRocks(relationship) && <span className="badge warn"><Icon name="warn" size={12} /> {t('profile.badge.onTheRocks')}</span>}
                 </>
               )}
@@ -1162,10 +1160,10 @@ export function Chat() {
               </div>
             )}
             {scene && cal && (
-              <span className="date-scene-lead" title={`${cal.dayOfWeek}, ${cal.season}`}>
+              <span className="date-scene-lead" title={`${dayLabel(t, cal.dayOfWeek)}, ${seasonLabel(t, cal.season)}`}>
                 <span className="ph">{PHASE_ICONS[scene.phase]}</span>
                 <span className="day">
-                  {t('dash.hud.day', { day: scene.day })} · <span className="ph-label">{PHASE_LABELS[scene.phase]}</span>
+                  {t('dash.hud.day', { day: scene.day })} · <span className="ph-label">{phaseLabel(t, scene.phase)}</span>
                 </span>
               </span>
             )}
@@ -1281,7 +1279,7 @@ export function Chat() {
                       onClick={() => setIntent((cur) => (cur === opt ? null : opt))}
                     >
                       <span className="intent-chip-emoji">{INTENT_ICONS[opt]}</span>
-                      {INTENT_LABELS[opt]}
+                      {intentLabel(t, opt)}
                     </button>
                   ))}
                 </div>
@@ -1289,7 +1287,7 @@ export function Chat() {
               <div className="chat-input date-composer">
                 <textarea
                   value={input}
-                  placeholder={intent ? t('chat.composer.withIntent', { intent: INTENT_LABELS[intent], name: character.name }) : t('chat.composer.message', { name: character.name })}
+                  placeholder={intent ? t('chat.composer.withIntent', { intent: intentLabel(t, intent), name: character.name }) : t('chat.composer.message', { name: character.name })}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {

@@ -1,12 +1,12 @@
 import {
   DATING_STAT_KEYS,
-  DATING_STAT_LABELS,
   RELATIONSHIP_STAT_KEYS,
-  RELATIONSHIP_STAT_LABELS,
   type DatingStats,
   type Relationship,
   type RelationshipStatKey,
 } from '@dsim/shared';
+import { useT } from '../i18n';
+import { datingStatLabel, relStatLabel } from '../i18n/sharedLabels';
 
 export function StatBar({
   label,
@@ -55,12 +55,13 @@ export function RelationshipBars({
   /** Per-stat changes to surface as floating chips (e.g. after a date). */
   deltas?: Partial<Record<RelationshipStatKey, number>>;
 }) {
+  const t = useT();
   return (
     <div>
       {RELATIONSHIP_STAT_KEYS.map((k) => (
         <StatBar
           key={k}
-          label={RELATIONSHIP_STAT_LABELS[k]}
+          label={relStatLabel(t, k)}
           value={relationship[k]}
           tension={k === 'tension'}
           delta={deltas?.[k]}
@@ -71,10 +72,11 @@ export function RelationshipBars({
 }
 
 export function DatingBars({ stats }: { stats: DatingStats }) {
+  const t = useT();
   return (
     <div>
       {DATING_STAT_KEYS.map((k) => (
-        <StatBar key={k} label={DATING_STAT_LABELS[k]} value={stats[k]} />
+        <StatBar key={k} label={datingStatLabel(t, k)} value={stats[k]} />
       ))}
     </div>
   );

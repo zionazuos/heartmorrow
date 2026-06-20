@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { PHASE_ICONS, PHASE_LABELS, SEASON_ICONS, deriveCalendar, type SleepResponse, type WealthSummary } from '@dsim/shared';
+import { PHASE_ICONS, SEASON_ICONS, deriveCalendar, type SleepResponse, type WealthSummary } from '@dsim/shared';
 import { useAppData } from '../state/app-context';
+import { useT } from '../i18n';
+import { phaseLabel, dayLabel, seasonLabel } from '../i18n/sharedLabels';
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { EnergyPips } from './EnergyPips';
@@ -9,6 +11,7 @@ import { Modal } from './ui';
 
 /** Compact day / time-of-day / stamina indicator + Sleep control for the active world. */
 export function DayHud() {
+  const t = useT();
   const { worlds, activeWorldId, activeWorld, worldState, setActiveWorld, sleep, player, dayTick, activeDate } =
     useAppData();
   const [recap, setRecap] = useState<SleepResponse | null>(null);
@@ -72,13 +75,13 @@ export function DayHud() {
         activeName && <div className="hud-worldname">{activeName}</div>
       )}
 
-      <div className="hud-clock" title={`${PHASE_LABELS[worldState.phase]} · ${cal.dayOfWeek} · ${cal.season}`}>
+      <div className="hud-clock" title={`${phaseLabel(t, worldState.phase)} · ${dayLabel(t, cal.dayOfWeek)} · ${seasonLabel(t, cal.season)}`}>
         <span className="hud-phase">{PHASE_ICONS[worldState.phase]}</span>
         <div className="hud-when">
-          <span className="hud-day">Day {worldState.day} · {PHASE_LABELS[worldState.phase]}</span>
+          <span className="hud-day">{t('dash.hud.day', { day: worldState.day })} · {phaseLabel(t, worldState.phase)}</span>
           <span className="hud-cal">
-            {SEASON_ICONS[cal.season]} {cal.dayOfWeek}
-            {cal.isWeekend ? ' · weekend' : ''}
+            {SEASON_ICONS[cal.season]} {dayLabel(t, cal.dayOfWeek)}
+            {cal.isWeekend ? ` · ${t('dash.hud.weekend')}` : ''}
           </span>
         </div>
       </div>
@@ -125,6 +128,7 @@ export function DayHud() {
 }
 
 function RecapModal({ res, onClose }: { res: SleepResponse; onClose: () => void }) {
+  const t = useT();
   return (
     <Modal onClose={onClose}>
       <>
@@ -166,8 +170,8 @@ function RecapModal({ res, onClose }: { res: SleepResponse; onClose: () => void 
           <div className="row" style={{ gap: 6, marginTop: 4 }}>
             {res.calendar && (
               <span className="badge">
-                {res.calendar.dayOfWeek} · {res.calendar.season}
-                {res.calendar.isWeekend ? ' · weekend ⚡' : ''}
+                {dayLabel(t, res.calendar.dayOfWeek)} · {seasonLabel(t, res.calendar.season)}
+                {res.calendar.isWeekend ? ` · ${t('dash.hud.weekend')} ⚡` : ''}
               </span>
             )}
             {res.weather && (

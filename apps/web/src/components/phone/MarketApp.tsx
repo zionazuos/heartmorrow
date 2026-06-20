@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  STOCK_SECTOR_LABELS,
   type Company,
   type CompanyCreate,
   type MarketCompanyView,
@@ -12,6 +11,7 @@ import { api } from '../../lib/api';
 import { useAsync, errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
 import { useT, type TFunc } from '../../i18n';
+import { sectorLabel } from '../../i18n/sharedLabels';
 import { Banner, Empty, Field, Loader, ConfirmDialog } from '../ui';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
@@ -68,7 +68,7 @@ function CompanyRow({
       <div className="mkt-row-head">
         <div className="mkt-ticker-block">
           <span className="mkt-ticker">{company.ticker}</span>
-          <span className="mkt-sector-tag">{STOCK_SECTOR_LABELS[company.sector as StockSector] ?? company.sector}</span>
+          <span className="mkt-sector-tag">{sectorLabel(t, company.sector)}</span>
         </div>
         <div className="mkt-price-block">
           <span className="mkt-price">◈ {price}</span>
@@ -197,7 +197,7 @@ function DraftCard({
             onChange={(e) => onEdit(index, { sector: e.target.value as StockSector })}
           >
             {SECTORS.map((s) => (
-              <option key={s} value={s}>{STOCK_SECTOR_LABELS[s]}</option>
+              <option key={s} value={s}>{sectorLabel(t, s)}</option>
             ))}
           </select>
         </Field>
@@ -499,7 +499,7 @@ export function MarketApp() {
                         >
                           <option value="">{t('mkt.any')}</option>
                           {SECTORS.map((s) => (
-                            <option key={s} value={s}>{STOCK_SECTOR_LABELS[s]}</option>
+                            <option key={s} value={s}>{sectorLabel(t, s)}</option>
                           ))}
                         </select>
                       </Field>
@@ -569,7 +569,7 @@ export function MarketApp() {
                         onChange={(e) => setNewForm({ ...newForm, sector: e.target.value as StockSector })}
                       >
                         {SECTORS.map((s) => (
-                          <option key={s} value={s}>{STOCK_SECTOR_LABELS[s]}</option>
+                          <option key={s} value={s}>{sectorLabel(t, s)}</option>
                         ))}
                       </select>
                     </Field>

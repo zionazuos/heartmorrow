@@ -11,6 +11,7 @@ import {
 import { api } from '../../lib/api';
 import { useAppData } from '../../state/app-context';
 import { useT, type TFunc } from '../../i18n';
+import { seasonLabel, dayLabel } from '../../i18n/sharedLabels';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Empty, Spinner } from '../ui';
@@ -173,7 +174,7 @@ export function CalendarApp() {
           <div className="pal-season-mid">
             <span className="pal-season-icon">{SEASON_ICONS[headCal.season]}</span>
             <div className="pal-season-text">
-              <span className="pal-season-name">{headCal.season}</span>
+              <span className="pal-season-name">{seasonLabel(t, headCal.season)}</span>
               <span className="pal-season-sub">
                 {hasYears ? t('cal.year', { year: yearOf(firstDay) }) : ''}
                 {t('cal.daysRange', { from: firstDay, to: firstDay + SEASON_LENGTH - 1 })}
@@ -225,7 +226,7 @@ export function CalendarApp() {
                 style={{ animationDelay: `${Math.min(i * 11, 260)}ms` }}
                 disabled={isFuture}
                 onClick={() => !isFuture && openDay(d)}
-                title={`${t('cal.cellTitle', { day: d, dow: cal.dayOfWeek })}${cal.holiday ? ` · ${cal.holiday.name}` : ''}`}
+                title={`${t('cal.cellTitle', { day: d, dow: dayLabel(t, cal.dayOfWeek) })}${cal.holiday ? ` · ${cal.holiday.name}` : ''}`}
               >
                 <span className="pal-cell-day">{d}</span>
                 <span className="pal-cell-wx" aria-hidden="true">
@@ -331,7 +332,7 @@ function DayDetail({
         <div className="pal-plate">
           <div className="pal-plate-day">{t('dash.hud.day', { day })}</div>
           <div className="pal-plate-when">
-            {SEASON_ICONS[cal.season]} {cal.dayOfWeek} · {cal.season} {cal.seasonDay}
+            {SEASON_ICONS[cal.season]} {dayLabel(t, cal.dayOfWeek)} · {seasonLabel(t, cal.season)} {cal.seasonDay}
             {cal.isWeekend ? ` · ${t('dash.hud.weekend')}` : ''}
           </div>
           {entry && (

@@ -7,16 +7,13 @@ import {
   type PropertyLease,
   type RentCadence,
   type RelationshipStatKey,
-  PROPERTY_CATEGORY_LABELS,
-  RELATIONSHIP_STAT_LABELS,
   RELATIONSHIP_STAT_KEYS,
-  RENT_CADENCE_LABELS,
-  RENT_CADENCE_PER,
 } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { useAsync, errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
 import { useT } from '../../i18n';
+import { propCatLabel, relStatLabel, cadenceLabel, cadencePer } from '../../i18n/sharedLabels';
 import { Banner, Empty, Field, Loader, ConfirmDialog } from '../ui';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
@@ -314,7 +311,7 @@ export function PropertyApp() {
                   <option value="">{t('mkt.any')}</option>
                   {PROPERTY_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
-                      {PROPERTY_CATEGORY_LABELS[c]}
+                      {propCatLabel(t, c)}
                     </option>
                   ))}
                 </select>
@@ -365,7 +362,7 @@ export function PropertyApp() {
                           >
                             {PROPERTY_CATEGORIES.map((c) => (
                               <option key={c} value={c}>
-                                {PROPERTY_CATEGORY_LABELS[c]}
+                                {propCatLabel(t, c)}
                               </option>
                             ))}
                           </select>
@@ -395,7 +392,7 @@ export function PropertyApp() {
                           >
                             {RENT_CADENCES.map((rc) => (
                               <option key={rc} value={rc}>
-                                {RENT_CADENCE_LABELS[rc]}
+                                {cadenceLabel(t, rc)}
                               </option>
                             ))}
                           </select>
@@ -412,7 +409,7 @@ export function PropertyApp() {
                             <option value="">{t('prop.none')}</option>
                             {RELATIONSHIP_STAT_KEYS.map((k) => (
                               <option key={k} value={k}>
-                                {RELATIONSHIP_STAT_LABELS[k]}
+                                {relStatLabel(t, k)}
                               </option>
                             ))}
                           </select>
@@ -470,7 +467,7 @@ export function PropertyApp() {
                 >
                   {PROPERTY_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
-                      {PROPERTY_CATEGORY_LABELS[c]}
+                      {propCatLabel(t, c)}
                     </option>
                   ))}
                 </select>
@@ -502,7 +499,7 @@ export function PropertyApp() {
                 >
                   {RENT_CADENCES.map((rc) => (
                     <option key={rc} value={rc}>
-                      {RENT_CADENCE_LABELS[rc]}
+                      {cadenceLabel(t, rc)}
                     </option>
                   ))}
                 </select>
@@ -519,7 +516,7 @@ export function PropertyApp() {
                   <option value="">{t('prop.none')}</option>
                   {RELATIONSHIP_STAT_KEYS.map((k) => (
                     <option key={k} value={k}>
-                      {RELATIONSHIP_STAT_LABELS[k]}
+                      {relStatLabel(t, k)}
                     </option>
                   ))}
                 </select>
@@ -611,7 +608,7 @@ export function PropertyApp() {
                             <div className="flex-fill">
                               <h4 className="prop-card-name">{property.name}</h4>
                               <div className="prop-card-cat">
-                                {PROPERTY_CATEGORY_LABELS[property.category]}
+                                {propCatLabel(t, property.category)}
                                 {property.indoor ? t('prop.indoorSuffix') : t('prop.outdoorSuffix')}
                               </div>
                             </div>
@@ -659,7 +656,7 @@ export function PropertyApp() {
                             ) : (
                               <div className="prop-econ-row">
                                 <span className="prop-price-label">
-                                  {t('prop.rentLine', { amount: property.rentAmount, per: RENT_CADENCE_PER[cadence] })}
+                                  {t('prop.rentLine', { amount: property.rentAmount, per: cadencePer(t, cadence) })}
                                 </span>
                                 <span className="prop-price secondary">
                                   {t('prop.nextDue', { day: (lease as PropertyLease).nextDueDay })}
@@ -672,7 +669,7 @@ export function PropertyApp() {
                               {property.rentAmount > 0 && (
                                 <div className="prop-econ-row">
                                   <span className="prop-price-label">
-                                    {t('prop.leasePer', { per: RENT_CADENCE_PER[cadence] })}
+                                    {t('prop.leasePer', { per: cadencePer(t, cadence) })}
                                   </span>
                                   <span className="prop-price secondary">◈ {property.rentAmount}</span>
                                 </div>
@@ -687,7 +684,7 @@ export function PropertyApp() {
                           {property.buffStat && property.buffAmount > 0 && (
                             <div className="prop-econ-row prop-buff-row">
                               <span className="prop-buff">
-                                {t('prop.buffLine', { amount: property.buffAmount, stat: RELATIONSHIP_STAT_LABELS[property.buffStat] })}
+                                {t('prop.buffLine', { amount: property.buffAmount, stat: relStatLabel(t, property.buffStat) })}
                                 ({owned ? t('prop.buffOwned') : t('prop.buffLeased')})
                               </span>
                             </div>

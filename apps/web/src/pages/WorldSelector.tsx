@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   PHASE_ICONS,
-  PHASE_LABELS,
   GENDER_LABELS,
   SEXUALITY_LABELS,
   deriveCalendar,
@@ -18,6 +17,7 @@ import { useAsync, errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
 import { useT } from '../i18n';
 import type { MessageKey } from '../i18n/locales/en';
+import { phaseLabel, dayLabel, genderLabel, sexualityLabel } from '../i18n/sharedLabels';
 import { Portrait } from '../components/Portrait';
 import { Icon, type IconName } from '../components/Icon';
 import { Banner, ConfirmDialog, Field, Spinner } from '../components/ui';
@@ -159,8 +159,8 @@ function WorldCard({
                     <span className="wsel-phase">{PHASE_ICONS[state.phase]}</span> {state.day}
                   </span>
                   <span className="wsel-stat-sub">
-                    {PHASE_LABELS[state.phase]}
-                    {cal ? ` · ${cal.dayOfWeek}` : ''}
+                    {phaseLabel(t, state.phase)}
+                    {cal ? ` · ${dayLabel(t, cal.dayOfWeek)}` : ''}
                   </span>
                 </div>
               )}
@@ -473,9 +473,9 @@ export function WorldOnboarding() {
             <div className="inline-fields">
               <Field label={t('world.onb.gender')} hint={t('world.onb.genderHint')}>
                 <select value={persona.gender} onChange={(e) => setPersona({ ...persona, gender: e.target.value as Gender })}>
-                  {Object.entries(GENDER_LABELS).map(([k, label]) => (
+                  {Object.keys(GENDER_LABELS).map((k) => (
                     <option key={k} value={k}>
-                      {label}
+                      {genderLabel(t, k)}
                     </option>
                   ))}
                 </select>
@@ -485,9 +485,9 @@ export function WorldOnboarding() {
                   value={persona.sexuality}
                   onChange={(e) => setPersona({ ...persona, sexuality: e.target.value as Sexuality })}
                 >
-                  {Object.entries(SEXUALITY_LABELS).map(([k, label]) => (
+                  {Object.keys(SEXUALITY_LABELS).map((k) => (
                     <option key={k} value={k}>
-                      {label}
+                      {sexualityLabel(t, k)}
                     </option>
                   ))}
                 </select>

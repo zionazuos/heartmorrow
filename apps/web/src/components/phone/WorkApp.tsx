@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { ActivityDef, Character } from '@dsim/shared';
-import { RELATIONSHIP_STAT_LABELS, type RelationshipStatKey } from '@dsim/shared';
+import { type RelationshipStatKey } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
 import { useT, type TFunc } from '../../i18n';
+import { relStatLabel } from '../../i18n/sharedLabels';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { PortraitPicker } from '../PortraitPicker';
@@ -14,7 +15,7 @@ import './phone-life.css';
 /** Translate a stat key + numeric value into a warm, feeling-first phrase. */
 function trainingNote(stat: RelationshipStatKey | undefined, value: number | undefined, t: TFunc): string {
   if (!stat) return t('work.note.default');
-  const label = RELATIONSHIP_STAT_LABELS[stat] ?? stat;
+  const label = relStatLabel(t, stat);
   if (stat === 'tension') {
     // Tension rising is usually a negative signal.
     return value != null && value > 50 ? t('work.note.tensionHigh', { label }) : t('work.note.tensionLow');
@@ -155,7 +156,7 @@ export function WorkApp() {
             <div className="pl-tile-action">
               <button className="btn sm" onClick={() => perform(a)} disabled={busy || !target || noEnergy || onDate}>
                 <span className="pl-coin">+{a.amount}</span>
-                {a.relationshipStat ? ` ${RELATIONSHIP_STAT_LABELS[a.relationshipStat]}` : ''}
+                {a.relationshipStat ? ` ${relStatLabel(t, a.relationshipStat)}` : ''}
               </button>
             </div>
           </div>

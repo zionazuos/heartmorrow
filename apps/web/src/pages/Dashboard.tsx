@@ -1,6 +1,7 @@
 import './dashboard.page.css';
 import { Link } from 'react-router-dom';
-import { PHASE_ICONS, PHASE_LABELS, SEASON_ICONS, deriveCalendar, type Phase } from '@dsim/shared';
+import { PHASE_ICONS, SEASON_ICONS, deriveCalendar, type Phase } from '@dsim/shared';
+import { phaseLabel, seasonLabel, dayLabel } from '../i18n/sharedLabels';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { Portrait } from '../components/Portrait';
@@ -91,22 +92,22 @@ export function Dashboard() {
                 <span className="dash-cell-v">{activeWorld.name}</span>
               </div>
             )}
-            <div className="dash-cell" title={PHASE_LABELS[worldState.phase]}>
+            <div className="dash-cell" title={phaseLabel(t, worldState.phase)}>
               <span className="dash-cell-k">{t('dash.hud.dayHour')}</span>
               <span className="dash-cell-v">
                 <span className="dash-icon">{PHASE_ICONS[worldState.phase]}</span>
                 <span className="dash-num">{t('dash.hud.day', { day: worldState.day })}</span>
               </span>
-              <span className="dash-cell-sub">{PHASE_LABELS[worldState.phase]}</span>
+              <span className="dash-cell-sub">{phaseLabel(t, worldState.phase)}</span>
             </div>
-            <div className="dash-cell" title={`${cal.dayOfWeek} · ${cal.season}`}>
+            <div className="dash-cell" title={`${dayLabel(t, cal.dayOfWeek)} · ${seasonLabel(t, cal.season)}`}>
               <span className="dash-cell-k">{t('dash.hud.calendar')}</span>
               <span className="dash-cell-v">
                 <span className="dash-icon">{SEASON_ICONS[cal.season]}</span>
-                {cal.dayOfWeek}
+                {dayLabel(t, cal.dayOfWeek)}
               </span>
               <span className="dash-cell-sub">
-                {cal.season}
+                {seasonLabel(t, cal.season)}
                 {cal.isWeekend ? ` · ${t('dash.hud.weekend')}` : ''}
               </span>
             </div>

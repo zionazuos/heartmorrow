@@ -14,6 +14,7 @@ import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
 import { useI18n, LOCALES, type Locale } from '../i18n';
+import { genderLabel, sexualityLabel } from '../i18n/sharedLabels';
 import { Banner, Field, Spinner } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { CrisisResources } from '../components/CrisisResources';
@@ -373,9 +374,9 @@ export function Settings() {
           <div className="inline-fields">
             <Field label={t('settings.persona.gender')} hint={t('settings.persona.genderHint')}>
               <select value={player.gender} onChange={(e) => setPlayer({ ...player, gender: e.target.value as Gender })}>
-                {Object.entries(GENDER_LABELS).map(([k, label]) => (
+                {Object.keys(GENDER_LABELS).map((k) => (
                   <option key={k} value={k}>
-                    {label}
+                    {genderLabel(t, k)}
                   </option>
                 ))}
               </select>
@@ -385,9 +386,9 @@ export function Settings() {
                 value={player.sexuality}
                 onChange={(e) => setPlayer({ ...player, sexuality: e.target.value as Sexuality })}
               >
-                {Object.entries(SEXUALITY_LABELS).map(([k, label]) => (
+                {Object.keys(SEXUALITY_LABELS).map((k) => (
                   <option key={k} value={k}>
-                    {label}
+                    {sexualityLabel(t, k)}
                   </option>
                 ))}
               </select>

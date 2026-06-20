@@ -10,16 +10,9 @@ import {
   isMemorialized,
   isOnTheRocks,
   RECONCILE_COOLDOWN_DAYS,
-  RELATIONSHIP_STATUS_LABELS,
-  RELATIONSHIP_STYLE_LABELS,
-  CHARACTER_LINK_LABELS,
-  GENDER_LABELS,
-  SEXUALITY_LABELS,
   DAYS_OF_WEEK,
-  WEATHER_LABELS,
   WEATHER_ICONS,
   listActiveBuffs,
-  DATING_STAT_LABELS,
   type CharacterMemory,
   type ConversationSession,
   type Relationship,
@@ -29,6 +22,16 @@ import { useAsync, errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
 import { useT, type TFunc } from '../i18n';
 import type { MessageKey } from '../i18n/locales/en';
+import {
+  statusLabel,
+  relStyleLabel,
+  linkLabel,
+  genderLabel,
+  sexualityLabel,
+  datingStatLabel,
+  weatherLabel as weatherLabelTr,
+  dayLabel,
+} from '../i18n/sharedLabels';
 import { Portrait } from '../components/Portrait';
 import { Icon } from '../components/Icon';
 import { CrisisResources } from '../components/CrisisResources';
@@ -54,7 +57,6 @@ function relationshipStatus(rel: Relationship, t: TFunc): string {
   return rel.tension >= 60 ? `${display}${t('profile.tenseSuffix')}` : display;
 }
 
-const weatherLabel = (k: string) => WEATHER_LABELS[k as keyof typeof WEATHER_LABELS] ?? k;
 const weatherIcon = (k: string) => WEATHER_ICONS[k as keyof typeof WEATHER_ICONS] ?? '';
 
 // ---------------------------------------------------------------------------
@@ -155,7 +157,7 @@ export function CharacterProfile() {
           : brokenUp
             ? t('profile.tag.parted')
             : status !== 'none'
-              ? RELATIONSHIP_STATUS_LABELS[status].toLowerCase()
+              ? statusLabel(t, status).toLowerCase()
               : relationshipStage(relationship).label;
 
         const hasAbout =
@@ -203,16 +205,16 @@ export function CharacterProfile() {
                   {character.gender !== 'unspecified' && (
                     <>
                       <span className="sep">·</span>
-                      {GENDER_LABELS[character.gender]}
+                      {genderLabel(t, character.gender)}
                     </>
                   )}
                   <span className="sep">·</span>
-                  {RELATIONSHIP_STYLE_LABELS[character.relationshipStyle]}
+                  {relStyleLabel(t, character.relationshipStyle)}
                   {character.sexuality !== 'unspecified' &&
                     (creatorMode || relationship.flags['state:orientationRevealed'] === true) && (
                       <>
                         <span className="sep">·</span>
-                        {SEXUALITY_LABELS[character.sexuality]}
+                        {sexualityLabel(t, character.sexuality)}
                       </>
                     )}
                 </div>
@@ -282,7 +284,7 @@ export function CharacterProfile() {
                         <span className="badge accent">{relationshipStatus(relationship, t)}</span>
                         {status !== 'none' && (
                           <span className="badge accent">
-                            <Icon name="affection" size={13} /> {RELATIONSHIP_STATUS_LABELS[status]}
+                            <Icon name="affection" size={13} /> {statusLabel(t, status)}
                           </span>
                         )}
                         {onTheRocks && <span className="badge warn"><Icon name="warn" size={13} /> {t('profile.badge.onTheRocks')}</span>}
@@ -347,7 +349,7 @@ export function CharacterProfile() {
                               {buffs.map((b) => (
                                 <span className={`badge prof-buff${b.delta < 0 ? ' down' : ''}`} key={b.stat}>
                                   {b.delta >= 0 ? '+' : ''}
-                                  {b.delta} {DATING_STAT_LABELS[b.stat]} <span className="left">{t('profile.overview.buffLeft', { n: b.remaining })}</span>
+                                  {b.delta} {datingStatLabel(t, b.stat)} <span className="left">{t('profile.overview.buffLeft', { n: b.remaining })}</span>
                                 </span>
                               ))}
                             </div>
@@ -395,7 +397,7 @@ export function CharacterProfile() {
                       <div className="prof-conns">
                         {connections.map((l, i) => (
                           <Link className="prof-conn" to={`/characters/${l.targetId}`} key={i}>
-                            <span className="prof-conn-kind">{CHARACTER_LINK_LABELS[l.kind]}</span>
+                            <span className="prof-conn-kind">{linkLabel(t, l.kind)}</span>
                             <span className="prof-conn-name flex-fill">{nameOf(l.targetId)}</span>
                             <Icon name="chevronRight" size={15} />
                           </Link>
@@ -483,7 +485,7 @@ export function CharacterProfile() {
                                   shift: character.employment.shiftPhase,
                                 })}
                                 {character.employment.workdays.length > 0 &&
-                                  ` · ${character.employment.workdays.map((d) => DAYS_OF_WEEK[d]?.slice(0, 3)).join(' ')}`}
+                                  ` · ${character.employment.workdays.map((d) => (DAYS_OF_WEEK[d] ? dayLabel(t, DAYS_OF_WEEK[d]).slice(0, 3) : '')).join(' ')}`}
                               </p>
                             </div>
                           )}
@@ -525,12 +527,12 @@ export function CharacterProfile() {
                           <div className="prof-weather">
                             {character.favoriteWeather.map((k) => (
                               <span className="prof-weather-chip fav" key={`f-${k}`}>
-                                ♥ {weatherIcon(k)} {weatherLabel(k)}
+                                ♥ {weatherIcon(k)} {weatherLabelTr(t, k)}
                               </span>
                             ))}
                             {character.dislikedWeather.map((k) => (
                               <span className="prof-weather-chip dis" key={`d-${k}`}>
-                                ✕ {weatherIcon(k)} {weatherLabel(k)}
+                                ✕ {weatherIcon(k)} {weatherLabelTr(t, k)}
                               </span>
                             ))}
                           </div>
