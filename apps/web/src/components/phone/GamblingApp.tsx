@@ -9,6 +9,7 @@ import {
 import { api } from '../../lib/api';
 import { useAppData } from '../../state/app-context';
 import { useAsync } from '../../lib/hooks';
+import { useT } from '../../i18n';
 import { Icon } from '../Icon';
 import { Empty, Loader } from '../ui';
 import { PhoneAppBar } from './PhoneAppBar';
@@ -28,6 +29,7 @@ const GLYPH: Record<CasinoGame, string> = {
 };
 
 export function GamblingApp() {
+  const t = useT();
   const { reloadPlayer, activeWorldId, dayTick } = useAppData();
   const [view, setView] = useState<CasinoGame | 'lobby'>('lobby');
   const [wallet, setWallet] = useState<GamblingWallet>();
@@ -63,9 +65,9 @@ export function GamblingApp() {
   if (!activeWorldId) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title="Casino" kicker="House of fortune" icon="gambling" />
+        <PhoneAppBar title={t('phone.app.gambling')} kicker={t('gmb.house')} icon="gambling" />
         <div className="gmb-scroll">
-          <Empty icon={<Icon name="gambling" size={34} />} title="No world active" />
+          <Empty icon={<Icon name="gambling" size={34} />} title={t('gmb.noWorld')} />
         </div>
       </div>
     );
@@ -75,14 +77,14 @@ export function GamblingApp() {
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title="Casino"
-        kicker={view === 'lobby' ? 'House of fortune' : CASINO_GAME_LABELS[view]}
+        title={t('phone.app.gambling')}
+        kicker={view === 'lobby' ? t('gmb.house') : CASINO_GAME_LABELS[view]}
         icon="gambling"
         left={
           view !== 'lobby' ? (
             <button className="gmb-backbtn" onClick={toLobby}>
               <Icon name="chevronRight" size={14} style={{ transform: 'rotate(180deg)' }} />
-              Lobby
+              {t('gmb.lobby')}
             </button>
           ) : undefined
         }
@@ -96,8 +98,8 @@ export function GamblingApp() {
               return (
                 <>
                   <div className="gmb-marquee">
-                    <h2>The Gilded Hour</h2>
-                    <p>place your bets</p>
+                    <h2>{t('gmb.marqueeTitle')}</h2>
+                    <p>{t('gmb.placeBets')}</p>
                   </div>
                   <LimitRibbon wallet={wl} />
                   <div className="gmb-lobby">
@@ -109,7 +111,7 @@ export function GamblingApp() {
                       </button>
                     ))}
                   </div>
-                  <div className="gmb-muted">House odds are real — play for the thrill, not the rent. Limits reset each day.</div>
+                  <div className="gmb-muted">{t('gmb.houseOdds')}</div>
                 </>
               );
             }
@@ -131,17 +133,18 @@ export function GamblingApp() {
 }
 
 function LimitRibbon({ wallet }: { wallet: GamblingWallet }) {
+  const t = useT();
   const pct = wallet.dailyLimit > 0 ? Math.min(100, (wallet.wageredToday / wallet.dailyLimit) * 100) : 0;
   return (
     <div className="gmb-limit">
       <span>
-        Wagered <b>◈ {wallet.wageredToday}</b>
+        {t('gmb.wagered')} <b>◈ {wallet.wageredToday}</b>
       </span>
       <span className="gmb-limit-bar">
         <i style={{ width: `${pct}%` }} />
       </span>
       <span>
-        Daily <b>◈ {wallet.dailyLimit}</b>
+        {t('gmb.daily')} <b>◈ {wallet.dailyLimit}</b>
       </span>
     </div>
   );

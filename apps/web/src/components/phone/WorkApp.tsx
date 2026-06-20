@@ -4,6 +4,7 @@ import { RELATIONSHIP_STAT_LABELS, type RelationshipStatKey } from '@dsim/shared
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
+import { useT, type TFunc } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { PortraitPicker } from '../PortraitPicker';
@@ -11,23 +12,22 @@ import { Banner } from '../ui';
 import './phone-life.css';
 
 /** Translate a stat key + numeric value into a warm, feeling-first phrase. */
-function trainingNote(stat: RelationshipStatKey | undefined, value: number | undefined): string {
-  if (!stat) return 'Time well spent.';
+function trainingNote(stat: RelationshipStatKey | undefined, value: number | undefined, t: TFunc): string {
+  if (!stat) return t('work.note.default');
   const label = RELATIONSHIP_STAT_LABELS[stat] ?? stat;
   if (stat === 'tension') {
     // Tension rising is usually a negative signal.
-    return value != null && value > 50
-      ? `There's tension in the air — ${label} is building.`
-      : 'The air is still a little charged.';
+    return value != null && value > 50 ? t('work.note.tensionHigh', { label }) : t('work.note.tensionLow');
   }
-  if (value == null) return `They warmed to you. ${label} is growing.`;
-  if (value >= 80) return `The bond deepens — ${label} is flourishing.`;
-  if (value >= 60) return `You're getting closer. ${label} keeps growing.`;
-  if (value >= 40) return `A good hour together. ${label} nudged upward.`;
-  return `Every moment counts. ${label} is slowly building.`;
+  if (value == null) return t('work.note.warmedNoVal', { label });
+  if (value >= 80) return t('work.note.flourishing', { label });
+  if (value >= 60) return t('work.note.closer', { label });
+  if (value >= 40) return t('work.note.goodHour', { label });
+  return t('work.note.slow', { label });
 }
 
 export function WorkApp() {
+  const t = useT();
   const { activeWorldId, reloadPlayer, refreshWorldState, worldState, dayTick, activeDate } = useAppData();
   const [activities, setActivities] = useState<ActivityDef[]>([]);
   const [allCharacters, setAllCharacters] = useState<Character[]>([]);
@@ -55,15 +55,15 @@ export function WorkApp() {
 
   const perform = async (a: ActivityDef) => {
     if (!activeWorldId) {
-      setError('Pick an active world first.');
+      setError(t('work.err.pickWorld'));
       return;
     }
     if (onDate) {
-      setError(`You're on a date with ${activeDate!.characterName} — wrap it up on the Date tab first.`);
+      setError(t('work.err.onDate', { name: activeDate!.characterName }));
       return;
     }
     if (a.kind === 'training' && !target) {
-      setError('Choose someone to spend time with.');
+      setError(t('work.err.chooseSomeone'));
       return;
     }
     setBusy(true);
@@ -77,11 +77,11 @@ export function WorkApp() {
       });
       await Promise.all([reloadPlayer(), refreshWorldState()]);
       if (a.kind === 'work') {
-        setNote(`Earned ◈${res.money}. (Day ${res.state.day}, ${res.state.phase})`);
+        setNote(t('work.earned', { money: res.money, day: res.state.day, phase: res.state.phase }));
       } else {
         const stat = a.relationshipStat;
         const now = stat && res.relationship ? res.relationship[stat] : undefined;
-        setNote(trainingNote(stat, now));
+        setNote(trainingNote(stat, now, t));
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -100,7 +100,7 @@ export function WorkApp() {
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title="Work &amp; Training" kicker="The day's roster" icon="work" />
+      <PhoneAppBar title={t('work.title')} kicker={t('work.kicker')} icon="work" />
       <div className="phone-embed pl-work-embed">
         {(note || error) && (
           <div className="pl-work-banner">
@@ -110,21 +110,14 @@ export function WorkApp() {
         )}
 
         <div className="pl-board">
-          <p className="pl-board-note">
-            Each entry spends one action — a piece of the day. Clock in for coin, or give your hours to
-            someone you care about.
-          </p>
-          {noEnergy && (
-            <p className="pl-board-note">You're out of energy for today — end the day to rest.</p>
-          )}
+          <p className="pl-board-note">{t('work.boardNote')}</p>
+          {noEnergy && <p className="pl-board-note">{t('work.noEnergy')}</p>}
           {onDate && (
-            <p className="pl-board-note">
-              You're on a date with {activeDate!.characterName} — finish it on the Date tab before clocking in.
-            </p>
+            <p className="pl-board-note">{t('work.onDateNote', { name: activeDate!.characterName })}</p>
           )}
         </div>
 
-        <div className="pl-eyebrow">Shifts · earn ◈</div>
+        <div className="pl-eyebrow">{t('work.shiftsHead')}</div>
         {work.map((a) => (
           <div className="pl-tile pl-work" key={a.id}>
             <div className="pl-tile-icon"><Icon name="work" size={18} /></div>
@@ -140,10 +133,10 @@ export function WorkApp() {
           </div>
         ))}
 
-        <div className="pl-eyebrow">Training · spend time together</div>
+        <div className="pl-eyebrow">{t('work.trainingHead')}</div>
         {partnerOptions.length > 0 && (
           <div className="pl-partner-pick">
-            <div className="pl-partner-label">With</div>
+            <div className="pl-partner-label">{t('work.with')}</div>
             <PortraitPicker
               options={partnerOptions}
               value={target}
