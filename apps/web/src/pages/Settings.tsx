@@ -12,6 +12,7 @@ import {
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
+import { useI18n, LOCALES, type Locale } from '../i18n';
 import { Banner, Field, Spinner } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { CrisisResources } from '../components/CrisisResources';
@@ -43,6 +44,7 @@ interface PlayerForm {
 
 export function Settings() {
   const { reloadPlayer, creatorMode, setCreatorMode, activeWorldId } = useAppData();
+  const { locale, setLocale, t } = useI18n();
   const [player, setPlayer] = useState<PlayerForm | null>(null);
   const [playerSaved, setPlayerSaved] = useState(false);
   const [playerSaving, setPlayerSaving] = useState(false);
@@ -251,6 +253,26 @@ export function Settings() {
       </div>
       {error && <Banner kind="error">{error}</Banner>}
       {savedNote && <Banner kind="ok">{savedNote}</Banner>}
+
+      <div className="card set-section">
+        <div className="section-head">
+          <div className="titles">
+            <div className="kicker">{t('settings.language.kicker')}</div>
+            <h2>{t('settings.language.title')}</h2>
+          </div>
+          <div className="trail" />
+        </div>
+        <p className="set-lede">{t('settings.language.lede')}</p>
+        <Field label={t('settings.language.label')}>
+          <select value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
+            {Object.entries(LOCALES).map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
 
       <div className="card set-section">
         <div className="section-head">

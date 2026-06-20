@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useAppData } from './state/app-context';
+import { useT } from './i18n';
+import type { MessageKey } from './i18n/locales/en';
 import { DayHud } from './components/DayHud';
 import { Icon, type IconName } from './components/Icon';
 import { Dashboard } from './pages/Dashboard';
@@ -20,15 +22,18 @@ import { Debug } from './pages/Debug';
 // `short` is the label used by the cramped bottom nav (phones); the roomy
 // sidebar always shows the full `label`. Only set it where the full label is
 // long enough to risk overflowing an evenly-flexed bottom-nav cell.
-const NAV: { to: string; icon: IconName; label: string; short?: string; end?: boolean; creatorOnly?: boolean }[] = [
-  { to: '/', icon: 'home', label: 'Home', end: true },
-  { to: '/characters', icon: 'people', label: 'People' },
-  { to: '/world', icon: 'chronicle', label: 'World', creatorOnly: true },
-  { to: '/chat', icon: 'date', label: 'Date' },
-  { to: '/phone', icon: 'phone', label: 'Phone' },
-  { to: '/settings', icon: 'settings', label: 'Settings' },
-  { to: '/worlds', icon: 'worlds', label: 'Switch world', short: 'Worlds' },
-  { to: '/debug', icon: 'debug', label: 'Debug', creatorOnly: true },
+// `label`/`short` are message keys resolved through `t()` at render time so the
+// nav follows the active language. `short` is the label used by the cramped
+// bottom nav (phones); the roomy sidebar always shows the full `label`.
+const NAV: { to: string; icon: IconName; label: MessageKey; short?: MessageKey; end?: boolean; creatorOnly?: boolean }[] = [
+  { to: '/', icon: 'home', label: 'nav.home', end: true },
+  { to: '/characters', icon: 'people', label: 'nav.people' },
+  { to: '/world', icon: 'chronicle', label: 'nav.world', creatorOnly: true },
+  { to: '/chat', icon: 'date', label: 'nav.date' },
+  { to: '/phone', icon: 'phone', label: 'nav.phone' },
+  { to: '/settings', icon: 'settings', label: 'nav.settings' },
+  { to: '/worlds', icon: 'worlds', label: 'nav.switchWorld', short: 'nav.worldsShort' },
+  { to: '/debug', icon: 'debug', label: 'nav.debug', creatorOnly: true },
 ];
 
 /** A short, stable key for the current screen — drives the per-screen wallpaper. */
@@ -56,6 +61,7 @@ function CreatorRoute({ children }: { children: ReactNode }) {
 export default function App() {
   const { creatorMode, unreadTexts, activeWorldId, activeDate } = useAppData();
   const location = useLocation();
+  const t = useT();
 
   // The world selector + onboarding are a full-screen experience OUTSIDE the
   // in-world shell — you haven't "entered" a world yet, so there's no sidebar/HUD.
@@ -85,8 +91,8 @@ export default function App() {
       return (
         <span
           className="nav-badge nav-badge-live"
-          title={`On a date with ${activeDate.characterName}`}
-          aria-label={`Date in progress with ${activeDate.characterName}`}
+          title={t('app.dateInProgress.title', { name: activeDate.characterName })}
+          aria-label={t('app.dateInProgress.label', { name: activeDate.characterName })}
         />
       );
     return null;
@@ -105,7 +111,7 @@ export default function App() {
             {nav.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? 'active' : '')}>
                 <span className="ico"><Icon name={n.icon} size={20} /></span>
-                {n.label}
+                {t(n.label)}
                 {badgeFor(n.to)}
               </NavLink>
             ))}
@@ -143,7 +149,7 @@ export default function App() {
         {nav.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ico"><Icon name={n.icon} size={20} /></span>
-            {n.short ?? n.label}
+            {t(n.short ?? n.label)}
             {badgeFor(n.to)}
           </NavLink>
         ))}
