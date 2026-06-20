@@ -10,6 +10,7 @@ import {
 } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { useAppData } from '../../state/app-context';
+import { useT, type TFunc } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Empty, Spinner } from '../ui';
@@ -28,7 +29,7 @@ const BEAT_CLAMP_CHARS = 150;
 /** One "what happened" beat. Long beats (e.g. a fuller date recap) clamp to a few
  *  lines with an inline expand toggle; short beats render plain. Remounted per day
  *  (keyed by day) so the expanded state never leaks between days. */
-function DayBeat({ beat }: { beat: DayRecordBeat }) {
+function DayBeat({ beat, t }: { beat: DayRecordBeat; t: TFunc }) {
   const [expanded, setExpanded] = useState(false);
   const long = beat.text.length > BEAT_CLAMP_CHARS;
   return (
@@ -40,7 +41,7 @@ function DayBeat({ beat }: { beat: DayRecordBeat }) {
         <span className={`pal-beat-text${long && !expanded ? ' clamped' : ''}`}>{beat.text}</span>
         {long && (
           <button type="button" className="pal-beat-more" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? 'Show less' : 'Show more'}
+            {expanded ? t('cal.showLess') : t('cal.showMore')}
           </button>
         )}
       </div>
@@ -50,6 +51,7 @@ function DayBeat({ beat }: { beat: DayRecordBeat }) {
 
 /** A calendar / almanac of every day: weather, what happened, and the day's recap. */
 export function CalendarApp() {
+  const t = useT();
   const { activeWorldId, dayTick } = useAppData();
   const [data, setData] = useState<WorldCalendar | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,10 +107,10 @@ export function CalendarApp() {
   if (!activeWorldId) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title="Almanac" kicker="Calendar" icon="calendar" />
+        <PhoneAppBar title={t('phone.app.calendar')} kicker={t('cal.kicker')} icon="calendar" />
         <div className="pal-app">
-          <Empty icon={<Icon name="calendar" size={36} />} title="No active world">
-            <p className="muted">Pick or create a world to keep its almanac.</p>
+          <Empty icon={<Icon name="calendar" size={36} />} title={t('phone.weather.noWorldTitle')}>
+            <p className="muted">{t('cal.noWorldBody')}</p>
           </Empty>
         </div>
       </div>
@@ -118,8 +120,8 @@ export function CalendarApp() {
   if (loading || !data) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title="Almanac" kicker="Calendar" icon="calendar" />
-        <div className="pal-app">{loading ? <Spinner /> : <p className="muted center">Couldn't load the almanac.</p>}</div>
+        <PhoneAppBar title={t('phone.app.calendar')} kicker={t('cal.kicker')} icon="calendar" />
+        <div className="pal-app">{loading ? <Spinner /> : <p className="muted center">{t('cal.loadError')}</p>}</div>
       </div>
     );
   }
@@ -145,13 +147,13 @@ export function CalendarApp() {
     <div className="phone-app pal-host">
       <div className="pal-base" ref={baseRef}>
       <PhoneAppBar
-        title="Almanac"
-        kicker="Calendar"
+        title={t('phone.app.calendar')}
+        kicker={t('cal.kicker')}
         icon="calendar"
         right={
           viewBlock !== currentBlock ? (
-            <button className="pal-today-btn" onClick={goToToday} title="Jump to today">
-              Today
+            <button className="pal-today-btn" onClick={goToToday} title={t('cal.jumpToday')}>
+              {t('phone.weather.today')}
             </button>
           ) : null
         }
@@ -164,7 +166,7 @@ export function CalendarApp() {
             className="pal-nav"
             onClick={() => setBlock(Math.max(0, viewBlock - 1))}
             disabled={viewBlock <= 0}
-            aria-label="Previous season"
+            aria-label={t('cal.prevSeason')}
           >
             <Icon name="chevronRight" size={18} className="pal-flip" />
           </button>
@@ -173,7 +175,8 @@ export function CalendarApp() {
             <div className="pal-season-text">
               <span className="pal-season-name">{headCal.season}</span>
               <span className="pal-season-sub">
-                {hasYears ? `Year ${yearOf(firstDay)} · ` : ''}Days {firstDay}–{firstDay + SEASON_LENGTH - 1}
+                {hasYears ? t('cal.year', { year: yearOf(firstDay) }) : ''}
+                {t('cal.daysRange', { from: firstDay, to: firstDay + SEASON_LENGTH - 1 })}
               </span>
             </div>
           </div>
@@ -181,7 +184,7 @@ export function CalendarApp() {
             className="pal-nav"
             onClick={() => setBlock(Math.min(currentBlock, viewBlock + 1))}
             disabled={viewBlock >= currentBlock}
-            aria-label="Next season"
+            aria-label={t('cal.nextSeason')}
           >
             <Icon name="chevronRight" size={18} />
           </button>
@@ -222,7 +225,7 @@ export function CalendarApp() {
                 style={{ animationDelay: `${Math.min(i * 11, 260)}ms` }}
                 disabled={isFuture}
                 onClick={() => !isFuture && openDay(d)}
-                title={`Day ${d} · ${cal.dayOfWeek}${cal.holiday ? ` · ${cal.holiday.name}` : ''}`}
+                title={`${t('cal.cellTitle', { day: d, dow: cal.dayOfWeek })}${cal.holiday ? ` · ${cal.holiday.name}` : ''}`}
               >
                 <span className="pal-cell-day">{d}</span>
                 <span className="pal-cell-wx" aria-hidden="true">
@@ -240,16 +243,14 @@ export function CalendarApp() {
                     ))}
                   </span>
                 )}
-                {isToday && <span className="pal-cell-today">Today</span>}
+                {isToday && <span className="pal-cell-today">{t('phone.weather.today')}</span>}
               </button>
             );
           })}
         </div>
 
         <p className="pal-foot">
-          {data.currentDay > 1
-            ? 'Tap a day to read its record. The week ahead is a forecast.'
-            : 'Your story begins. End each day to fill the almanac.'}
+          {data.currentDay > 1 ? t('cal.footActive') : t('cal.footStart')}
         </p>
       </div>
       </div>
@@ -283,6 +284,7 @@ function DayDetail({
   onClose: () => void;
   onClosed: () => void;
 }) {
+  const t = useT();
   const cal = deriveCalendar(day);
   const rec = entry?.record ?? null;
   const hasSummary = !!(rec && (rec.headline || rec.narrative));
@@ -310,15 +312,15 @@ function DayDetail({
       className={`pal-detail ${closing ? 'is-closing' : 'is-opening'}`}
       role="dialog"
       aria-modal="true"
-      aria-label={`Day ${day} — almanac`}
+      aria-label={t('cal.detailAria', { day })}
     >
       <div className="pal-detail-bar">
-        <button className="pal-back" onClick={onClose} aria-label="Back to calendar" ref={backRef}>
+        <button className="pal-back" onClick={onClose} aria-label={t('cal.backToCalendar')} ref={backRef}>
           <Icon name="chevronRight" size={18} className="pal-flip" />
-          <span>Calendar</span>
+          <span>{t('cal.kicker')}</span>
         </button>
         {rec && rec.income > 0 && (
-          <span className="pal-coin" title="Daily income">
+          <span className="pal-coin" title={t('cal.dailyIncome')}>
             <Icon name="coin" size={13} /> +{rec.income}
           </span>
         )}
@@ -327,14 +329,14 @@ function DayDetail({
       <div className="pal-detail-scroll">
         {/* Date plate */}
         <div className="pal-plate">
-          <div className="pal-plate-day">Day {day}</div>
+          <div className="pal-plate-day">{t('dash.hud.day', { day })}</div>
           <div className="pal-plate-when">
             {SEASON_ICONS[cal.season]} {cal.dayOfWeek} · {cal.season} {cal.seasonDay}
-            {cal.isWeekend ? ' · weekend' : ''}
+            {cal.isWeekend ? ` · ${t('dash.hud.weekend')}` : ''}
           </div>
           {entry && (
             <div className="pal-plate-wx">
-              <span className="pal-plate-wx-icon">{entry.weather.icon}</span> It's {entry.weather.label}
+              <span className="pal-plate-wx-icon">{entry.weather.icon}</span> {t('phone.weather.itsLabel', { label: entry.weather.label })}
             </div>
           )}
         </div>
@@ -358,23 +360,21 @@ function DayDetail({
                 ))}
               </ul>
             )}
-            {rec!.reconstructed && <div className="pal-recon">✧ Reconstructed from your almanac</div>}
+            {rec!.reconstructed && <div className="pal-recon">{t('cal.reconstructed')}</div>}
           </div>
         ) : (
           <div className="pal-recap pal-recap-quiet">
-            <p className="muted">
-              {isToday ? 'This day is still unfolding — end the day to write its record.' : 'A quiet day; nothing was written down.'}
-            </p>
+            <p className="muted">{isToday ? t('cal.todayUnfolding') : t('cal.quietDay')}</p>
           </div>
         )}
 
         {/* What happened — the day's beats */}
         {rec && rec.beats.length > 0 && (
           <>
-            <div className="pal-eyebrow">What happened</div>
+            <div className="pal-eyebrow">{t('cal.whatHappened')}</div>
             <div className="pal-beats">
               {rec.beats.map((b, i) => (
-                <DayBeat key={`${day}-${i}`} beat={b} />
+                <DayBeat key={`${day}-${i}`} beat={b} t={t} />
               ))}
             </div>
           </>
