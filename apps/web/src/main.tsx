@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import { AppDataProvider } from './state/app-context';
+import { I18nProvider } from './i18n';
 // Nocturne type system, bundled locally (no CDN) to keep the app offline-first.
 import '@fontsource-variable/fraunces';
 import '@fontsource-variable/hanken-grotesk';
@@ -19,9 +20,11 @@ const router = createBrowserRouter([
   {
     path: '*',
     element: (
-      <AppDataProvider>
-        <App />
-      </AppDataProvider>
+      <I18nProvider>
+        <AppDataProvider>
+          <App />
+        </AppDataProvider>
+      </I18nProvider>
     ),
   },
 ]);
