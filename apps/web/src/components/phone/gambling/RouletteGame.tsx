@@ -7,6 +7,8 @@ import {
 } from '@dsim/shared';
 import { api } from '../../../lib/api';
 import { errorMessage } from '../../../lib/hooks';
+import { useT, type TFunc } from '../../../i18n';
+import type { MessageKey } from '../../../i18n/locales/en';
 import { Banner } from '../../ui';
 import { ResultBanner, maxAffordable, type CasinoGameProps } from './shared';
 import './roulette.css';
@@ -19,15 +21,16 @@ function parseKey(key: string, stake: number): RouletteBet {
   const [kind, val] = key.split(':');
   return { kind: kind as RouletteBet['kind'], value: val ? Number(val) : 0, stake };
 }
-const labelFor = (key: string): string => {
+const labelFor = (key: string, t: TFunc): string => {
   const [kind, val] = key.split(':');
   if (kind === 'straight') return val!;
-  if (kind === 'dozen') return ['1st 12', '2nd 12', '3rd 12'][Number(val) - 1]!;
-  if (kind === 'column') return `Col ${val}`;
-  return kind!.charAt(0).toUpperCase() + kind!.slice(1);
+  if (kind === 'dozen') return t(`gmb.rl.dozen${val}` as MessageKey);
+  if (kind === 'column') return t('gmb.rl.col', { n: val ?? '' });
+  return t(`gmb.rl.${kind}` as MessageKey);
 };
 
 export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
+  const t = useT();
   const [chips, setChips] = useState<Record<string, number>>({});
   const [denom, setDenom] = useState(25);
   const [phase, setPhase] = useState<'bet' | 'spinning' | 'done'>('bet');
@@ -112,7 +115,7 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
       {/* Stake + chip selector */}
       <div className="rl-bankline">
         <span>
-          Staked <b className="gmb-value">◈ {total}</b>
+          {t('gmb.rl.staked')} <b className="gmb-value">◈ {total}</b>
         </span>
         <div className="rl-denoms">
           {DENOMS.filter((d) => d <= Math.max(top, DENOMS[0]!)).map((d) => (
@@ -122,7 +125,7 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
           ))}
         </div>
         <button className="rl-clear" onClick={clear} disabled={locked || total === 0}>
-          Clear
+          {t('gmb.rl.clear')}
         </button>
       </div>
 
@@ -149,33 +152,33 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
       {/* Outside bets */}
       <div className="rl-outside">
         {['dozen:1', 'dozen:2', 'dozen:3'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} />
+          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} t={t} />
         ))}
       </div>
       <div className="rl-outside">
         {['column:1', 'column:2', 'column:3'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} />
+          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} t={t} />
         ))}
       </div>
       <div className="rl-outside">
         {['low', 'even', 'red'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} tone={k} />
+          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} tone={k} t={t} />
         ))}
       </div>
       <div className="rl-outside">
         {['high', 'odd', 'black'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} tone={k} />
+          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} tone={k} t={t} />
         ))}
       </div>
 
       <div className="gmb-actions">
         <button className="gmb-go" onClick={spin} disabled={locked || total < wallet.minBet}>
-          {locked ? 'Spinning…' : total > 0 ? `Spin · ◈ ${total}` : `Place at least ◈ ${wallet.minBet}`}
+          {locked ? t('gmb.spinning') : total > 0 ? t('gmb.rl.spin', { total }) : t('gmb.rl.placeMin', { min: wallet.minBet })}
         </button>
       </div>
       {chipKeys.length > 0 && phase !== 'spinning' && (
         <div className="gmb-muted">
-          On the table: {chipKeys.map((k) => `${labelFor(k)} ◈${chips[k]}`).join(' · ')}
+          {t('gmb.rl.onTable', { bets: chipKeys.map((k) => `${labelFor(k, t)} ◈${chips[k]}`).join(' · ') })}
         </div>
       )}
     </div>
@@ -189,6 +192,7 @@ function Cell({
   place,
   disabled,
   tone,
+  t,
 }: {
   k: string;
   chips: Record<string, number>;
@@ -196,6 +200,7 @@ function Cell({
   place: (k: string) => void;
   disabled: boolean;
   tone?: string;
+  t: TFunc;
 }) {
   return (
     <button
@@ -203,7 +208,7 @@ function Cell({
       onClick={() => place(k)}
       disabled={disabled}
     >
-      {labelFor(k)}
+      {labelFor(k, t)}
       {chips[k] ? <i className="rl-chip">{chips[k]}</i> : null}
     </button>
   );

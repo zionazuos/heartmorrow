@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SUIT_PIP, isRedSuit, type Card, type GamblingWallet } from '@dsim/shared';
+import { useT } from '../../../i18n';
 
 /** The contract every casino game component fulfils inside GamblingApp. */
 export interface CasinoGameProps {
@@ -76,26 +77,27 @@ export function BetStepper({
   onChange: (next: number) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const top = maxAffordable(wallet);
   const canBet = top >= wallet.minBet;
   const set = (n: number) => onChange(clampBet(n, wallet));
   return (
     <div className="gmb-bet">
       <div className="gmb-bet-row">
-        <button className="gmb-bet-step" onClick={() => set(value - wallet.minBet)} disabled={disabled || !canBet || value <= wallet.minBet} aria-label="Lower bet">−</button>
+        <button className="gmb-bet-step" onClick={() => set(value - wallet.minBet)} disabled={disabled || !canBet || value <= wallet.minBet} aria-label={t('gmb.lowerBet')}>−</button>
         <div className="gmb-bet-amount">
           {value}
-          <small>your bet</small>
+          <small>{t('gmb.yourBet')}</small>
         </div>
-        <button className="gmb-bet-step" onClick={() => set(value + wallet.minBet)} disabled={disabled || !canBet || value >= top} aria-label="Raise bet">+</button>
+        <button className="gmb-bet-step" onClick={() => set(value + wallet.minBet)} disabled={disabled || !canBet || value >= top} aria-label={t('gmb.raiseBet')}>+</button>
       </div>
       <div className="gmb-chips">
         {CHIPS.filter((c) => c.v <= top).map((c) => (
-          <button key={c.v} className={`gmb-chip ${c.cls}`} onClick={() => set(value + c.v)} disabled={disabled || !canBet} aria-label={`Add ${c.v}`}>
+          <button key={c.v} className={`gmb-chip ${c.cls}`} onClick={() => set(value + c.v)} disabled={disabled || !canBet} aria-label={t('gmb.addChip', { v: c.v })}>
             {c.label}
           </button>
         ))}
-        <button className="gmb-chip vmax" onClick={() => set(top)} disabled={disabled || !canBet} aria-label="Bet the maximum">Max</button>
+        <button className="gmb-chip vmax" onClick={() => set(top)} disabled={disabled || !canBet} aria-label={t('gmb.betMax')}>{t('gmb.max')}</button>
       </div>
     </div>
   );
@@ -104,12 +106,13 @@ export function BetStepper({
 // --- Animated win/lose/push banner ------------------------------------------
 
 export function ResultBanner({ outcome, title, net }: { outcome: 'win' | 'lose' | 'push'; title: string; net: number }) {
+  const t = useT();
   const shown = useCountUp(Math.abs(net));
   return (
     <div className={`gmb-result ${outcome}`}>
       <span className="gmb-result-head">{title}</span>
       <span className="gmb-result-sub">
-        {outcome === 'win' ? <>+ <b>{formatCoin(shown)}</b></> : outcome === 'push' ? 'Bet returned' : <>− {formatCoin(shown)}</>}
+        {outcome === 'win' ? <>+ <b>{formatCoin(shown)}</b></> : outcome === 'push' ? t('gmb.betReturned') : <>− {formatCoin(shown)}</>}
       </span>
     </div>
   );
