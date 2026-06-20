@@ -15,6 +15,7 @@ import { api, assetUrl } from '../../lib/api';
 import { downscaleImageFile } from '../../lib/image';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
+import { useT } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Portrait } from '../Portrait';
@@ -49,6 +50,7 @@ export function MessagesApp() {
 // ——— Landlord Notice view ————————————————————————————————————————————————
 
 function LandlordView({ onBack }: { onBack: () => void }) {
+  const t = useT();
   const { activeWorldId, refreshInbox } = useAppData();
   const [notices, setNotices] = useState<LandlordNotice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,11 +78,11 @@ function LandlordView({ onBack }: { onBack: () => void }) {
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title="Property Management"
-        kicker="Notices"
+        title={t('msg.landlord.title')}
+        kicker={t('msg.landlord.kicker')}
         icon="property"
         left={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label="Back" title="Back">
+          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}>
             <Icon name="chevronDown" size={18} />
           </button>
         }
@@ -91,8 +93,8 @@ function LandlordView({ onBack }: { onBack: () => void }) {
       ) : notices.length === 0 ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="property" size={32} /></span>
-          <span className="pcom-empty-title">No notices</span>
-          <p>You're all caught up with your landlord.</p>
+          <span className="pcom-empty-title">{t('msg.landlord.emptyTitle')}</span>
+          <p>{t('msg.landlord.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-thread lnd-thread">
@@ -101,9 +103,9 @@ function LandlordView({ onBack }: { onBack: () => void }) {
               <div className="lnd-notice-header">
                 <span className="lnd-notice-kind">
                   <Icon name="warn" size={12} />
-                  {n.kind === 'eviction' ? 'EVICTION NOTICE' : 'RENT OVERDUE'}
+                  {n.kind === 'eviction' ? t('msg.landlord.eviction') : t('msg.landlord.overdue')}
                 </span>
-                <span className="lnd-notice-day">Day {n.dayNumber}</span>
+                <span className="lnd-notice-day">{t('dash.hud.day', { day: n.dayNumber })}</span>
               </div>
               <div className="pcom-bubble lnd-bubble">{n.body}</div>
             </div>
@@ -125,6 +127,7 @@ function ThreadList({
   onNew: () => void;
   onLandlord: () => void;
 }) {
+  const t = useT();
   const { activeWorldId, activeWorld, dayTick } = useAppData();
   const [loading, setLoading] = useState(true);
   const [threads, setThreads] = useState<Awaited<ReturnType<typeof api.phoneThreads>>>([]);
@@ -174,11 +177,11 @@ function ThreadList({
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title="Messages"
-        kicker="Inbox"
+        title={t('phone.app.messages')}
+        kicker={t('msg.inboxKicker')}
         icon="messages"
         right={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onNew} aria-label="New message" title="New message">
+          <button className="btn sm ghost pbar-iconbtn" onClick={onNew} aria-label={t('msg.new')} title={t('msg.new')}>
             <Icon name="edit" size={18} />
           </button>
         }
@@ -189,8 +192,8 @@ function ThreadList({
       ) : threads.length === 0 && !hasLandlordNotices ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="messages" size={32} /></span>
-          <span className="pcom-empty-title">No conversations yet</span>
-          <p>Tap the edit icon to text someone you've met — or wait for them to reach out to you.</p>
+          <span className="pcom-empty-title">{t('msg.emptyTitle')}</span>
+          <p>{t('msg.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-rows">
@@ -210,7 +213,7 @@ function ThreadList({
                 <span className="pcom-toprow">
                   <span className="pcom-name lnd-name">
                     <Icon name="warn" size={12} />
-                    {' '}Property Management
+                    {' '}{t('msg.landlord.title')}
                   </span>
                 </span>
                 {landlordPreview && (
@@ -220,27 +223,27 @@ function ThreadList({
             </button>
           )}
 
-          {threads.map((t) => (
+          {threads.map((th) => (
             <button
-              key={t.characterId}
-              className={`ph-rise pcom-row ${t.unread > 0 ? 'pcom-unread' : ''}`}
-              onClick={() => onOpen(t.characterId)}
+              key={th.characterId}
+              className={`ph-rise pcom-row ${th.unread > 0 ? 'pcom-unread' : ''}`}
+              onClick={() => onOpen(th.characterId)}
             >
               <span className="pcom-ava">
                 <Portrait
-                  character={{ name: t.characterName, portraitAssetId: t.portraitAssetId, expressionAssets: {} }}
+                  character={{ name: th.characterName, portraitAssetId: th.portraitAssetId, expressionAssets: {} }}
                   className="round"
                 />
-                {t.unread > 0 && <span className="pcom-count">{t.unread}</span>}
-                {!t.available && <span className="pcom-dnd" title="Unavailable today"><Icon name="moon" size={11} /></span>}
+                {th.unread > 0 && <span className="pcom-count">{th.unread}</span>}
+                {!th.available && <span className="pcom-dnd" title={t('msg.unavailableToday')}><Icon name="moon" size={11} /></span>}
               </span>
               <span className="pcom-body">
                 <span className="pcom-toprow">
-                  <span className="pcom-name">{t.characterName}</span>
-                  {t.lastAt != null && <span className="pcom-when">{new Date(t.lastAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
+                  <span className="pcom-name">{th.characterName}</span>
+                  {th.lastAt != null && <span className="pcom-when">{new Date(th.lastAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
                 </span>
                 <span className="pcom-preview">
-                  {!t.available ? (t.unavailableReason ?? 'is unavailable today') : (t.lastBody ?? 'Tap to start texting')}
+                  {!th.available ? (th.unavailableReason ?? t('msg.isUnavailableToday')) : (th.lastBody ?? t('msg.tapToStart'))}
                 </span>
               </span>
             </button>
@@ -252,6 +255,7 @@ function ThreadList({
 }
 
 function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: () => void }) {
+  const t = useT();
   const { activeWorldId, dayTick } = useAppData();
   const [contacts, setContacts] = useState<
     Array<{ id: string; name: string; portraitAssetId: string | null; available: boolean; unavailableReason: string | null }>
@@ -271,10 +275,10 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title="New message"
-        kicker="To"
+        title={t('msg.new')}
+        kicker={t('msg.to')}
         left={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label="Back" title="Back">
+          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}>
             <Icon name="chevronDown" size={18} />
           </button>
         }
@@ -284,12 +288,12 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
       ) : contacts.length === 0 ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="people" size={32} /></span>
-          <span className="pcom-empty-title">No contacts yet</span>
-          <p>You can only text people you've been on a date with. Go on a date first!</p>
+          <span className="pcom-empty-title">{t('msg.noContactsTitle')}</span>
+          <p>{t('msg.noContactsBody')}</p>
         </div>
       ) : (
         <div className="pcom-rows">
-          <div className="pcom-pick-head">Choose someone</div>
+          <div className="pcom-pick-head">{t('moments.choose')}</div>
           {contacts.map((c) => (
             <button
               key={c.id}
@@ -301,12 +305,12 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
                   character={{ name: c.name, portraitAssetId: c.portraitAssetId, expressionAssets: {} }}
                   className="round"
                 />
-                {!c.available && <span className="pcom-dnd" title="Unavailable today"><Icon name="moon" size={11} /></span>}
+                {!c.available && <span className="pcom-dnd" title={t('msg.unavailableToday')}><Icon name="moon" size={11} /></span>}
               </span>
               <span className="pcom-body">
                 <span className="pcom-name">{c.name}</span>
                 {!c.available && (
-                  <span className="pcom-busy">{c.unavailableReason ?? 'is unavailable today'}</span>
+                  <span className="pcom-busy">{c.unavailableReason ?? t('msg.isUnavailableToday')}</span>
                 )}
               </span>
             </button>
@@ -318,6 +322,7 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
 }
 
 function ThreadView({ characterId, onBack }: { characterId: string; onBack: () => void }) {
+  const t = useT();
   const { reloadPlayer, refreshInbox, assets, reloadAssets, dayTick } = useAppData();
   const [character, setCharacter] = useState<Character | null>(null);
   const [availability, setAvailability] = useState<{ available: boolean; reason: string | null }>({
@@ -379,7 +384,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
     // large image to JPEG) so an unsupported type is always rejected, regardless
     // of its size — the vision model can only read these formats.
     if (!(ALLOWED_IMAGE_MIME_TYPES as readonly string[]).includes(file.type)) {
-      setError(`Unsupported image type. Please choose a ${ALLOWED_IMAGE_LABEL} image.`);
+      setError(t('msg.unsupportedImage', { label: ALLOWED_IMAGE_LABEL }));
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
@@ -452,13 +457,13 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       await load();
       // A gift was consumed from the bag — keep the held-money/inventory in sync.
       if (gift) await reloadPlayer();
-      if (res.error) setError(`No reply: ${res.error}`);
+      if (res.error) setError(t('msg.noReply', { error: res.error }));
       // Subtle cue that the exchange shifted how they feel.
       const d = res.relationshipDelta ?? {};
       const net =
         (d.affection ?? 0) + (d.comfort ?? 0) + (d.chemistry ?? 0) + (d.trust ?? 0) + (d.respect ?? 0) - (d.tension ?? 0);
       if (net !== 0) {
-        setFeeling(net > 0 ? '— a little warmer' : '— a little cooler');
+        setFeeling(net > 0 ? t('msg.warmer') : t('msg.cooler'));
         setTimeout(() => setFeeling(null), 2200);
       }
     } catch (e) {
@@ -469,7 +474,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
     }
   };
 
-  const dayLabel = (m: TextMessage) => (m.dayNumber != null ? `Day ${m.dayNumber}` : 'Earlier');
+  const dayLabel = (m: TextMessage) => (m.dayNumber != null ? t('dash.hud.day', { day: m.dayNumber }) : t('msg.earlier'));
 
   const claim = async (textId: string) => {
     if (claimingId) return; // a tap is in flight — don't double-claim the gift
@@ -487,10 +492,10 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title={character?.name ?? 'Messages'}
-        kicker="Texting"
+        title={character?.name ?? t('phone.app.messages')}
+        kicker={t('msg.texting')}
         left={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label="Back" title="Back">
+          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}>
             <Icon name="chevronDown" size={18} />
           </button>
         }
@@ -510,8 +515,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
               {showDivider && <div className="pcom-day">{label}</div>}
               <div className={`pcom-msg ${m.sender}`}>
                 {imgSrc && (
-                  <a className="pcom-image-link" href={imgSrc} target="_blank" rel="noreferrer" title="Open full size">
-                    <img className="pcom-image" src={imgSrc} alt="Sent photo" loading="lazy" />
+                  <a className="pcom-image-link" href={imgSrc} target="_blank" rel="noreferrer" title={t('msg.openFull')}>
+                    <img className="pcom-image" src={imgSrc} alt={t('msg.sentPhoto')} loading="lazy" />
                   </a>
                 )}
                 {m.body && <div className="pcom-bubble">{m.body}</div>}
@@ -520,9 +525,9 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
                   <button className="pcom-gift" disabled={m.attachment.claimed || claimingId !== null} onClick={() => claim(m.id)}>
                     <span className="pcom-gift-icon"><Icon name="gift" size={20} /></span>
                     <span className="pcom-gift-text">
-                      <span className="pcom-gift-label">{m.attachment.claimed ? 'Kept' : 'A gift for you'}</span>
+                      <span className="pcom-gift-label">{m.attachment.claimed ? t('msg.gift.kept') : t('msg.gift.forYou')}</span>
                       <span className="pcom-gift-name">
-                        {m.attachment.claimed ? m.attachment.name : `Accept ${m.attachment.name}`}
+                        {m.attachment.claimed ? m.attachment.name : t('msg.gift.accept', { name: m.attachment.name })}
                       </span>
                     </span>
                   </button>
@@ -532,7 +537,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
                   <div className="pcom-gift pcom-gift-sent">
                     <span className="pcom-gift-icon"><Icon name="gift" size={20} /></span>
                     <span className="pcom-gift-text">
-                      <span className="pcom-gift-label">Gift sent</span>
+                      <span className="pcom-gift-label">{t('msg.gift.sent')}</span>
                       <span className="pcom-gift-name">{m.attachment.name}</span>
                     </span>
                   </div>
@@ -557,13 +562,13 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       {feeling && <div className="pcom-feeling">{feeling}</div>}
       {pendingImage && (
         <div className="pcom-attach">
-          <img className="pcom-attach-thumb" src={pendingImage.url} alt="Attachment preview" />
-          <span className="pcom-attach-label">Photo ready to send</span>
+          <img className="pcom-attach-thumb" src={pendingImage.url} alt={t('msg.attachPreview')} />
+          <span className="pcom-attach-label">{t('msg.photoReady')}</span>
           <button
             className="pcom-attach-remove"
             onClick={() => setPendingImage(null)}
-            aria-label="Remove image"
-            title="Remove image"
+            aria-label={t('msg.removeImage')}
+            title={t('msg.removeImage')}
           >
             <Icon name="close" size={14} />
           </button>
@@ -572,12 +577,12 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       {pendingGift && (
         <div className="pcom-attach">
           <span className="pcom-attach-gifticon"><Icon name="gift" size={16} /></span>
-          <span className="pcom-attach-label">Gift: {pendingGift.item.name}</span>
+          <span className="pcom-attach-label">{t('msg.giftLabel', { name: pendingGift.item.name })}</span>
           <button
             className="pcom-attach-remove"
             onClick={() => setPendingGift(null)}
-            aria-label="Remove gift"
-            title="Remove gift"
+            aria-label={t('msg.removeGift')}
+            title={t('msg.removeGift')}
           >
             <Icon name="close" size={14} />
           </button>
@@ -586,7 +591,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       {giftOpen && (
         <div className="pcom-giftmenu">
           {giftItems.length === 0 ? (
-            <p className="muted pcom-giftmenu-empty">No gifts on hand — buy something at the Shop first.</p>
+            <p className="muted pcom-giftmenu-empty">{t('chat.gift.empty')}</p>
           ) : (
             giftItems.map((e) => (
               <button key={e.inventoryItem.id} className="pcom-giftmenu-item" onClick={() => { setPendingGift(e); setGiftOpen(false); }}>
@@ -601,8 +606,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
         <div className="pcom-dnd-bar">
           <Icon name="moon" size={14} />
           <span>
-            {character?.name ?? 'They'} {availability.reason ?? 'is unavailable today'}. You can read past messages, but
-            you can&apos;t text them until they&apos;re free.
+            {t('msg.dndBar', { name: character?.name ?? t('msg.they'), reason: availability.reason ?? t('msg.isUnavailableToday') })}
           </span>
         </div>
       )}
@@ -621,8 +625,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           className="btn ghost sm pcom-attachbtn"
           onClick={() => fileRef.current?.click()}
           disabled={sending || uploadingImage || !availability.available}
-          aria-label="Attach photo"
-          title="Attach photo"
+          aria-label={t('msg.attachPhoto')}
+          title={t('msg.attachPhoto')}
         >
           <Icon name={uploadingImage ? 'refresh' : 'image'} size={18} />
         </button>
@@ -630,8 +634,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           className={`btn ghost sm pcom-attachbtn${giftOpen || pendingGift ? ' pcom-attachbtn-on' : ''}`}
           onClick={() => void openGiftMenu()}
           disabled={sending || uploadingImage || !availability.available}
-          aria-label="Send a gift"
-          title="Send a gift"
+          aria-label={t('msg.sendGift')}
+          title={t('msg.sendGift')}
         >
           <Icon name="gift" size={18} />
         </button>
@@ -640,12 +644,12 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           disabled={!availability.available}
           placeholder={
             !availability.available
-              ? `${character?.name ?? 'They'} can't talk right now`
+              ? t('msg.cantTalk', { name: character?.name ?? t('msg.they') })
               : pendingImage
-                ? 'Add a caption…'
+                ? t('msg.addCaption')
                 : pendingGift
-                  ? 'Add a note…'
-                  : `Text ${character?.name ?? '…'}`
+                  ? t('msg.addNote')
+                  : t('msg.textName', { name: character?.name ?? '…' })
           }
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -659,8 +663,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           className="btn primary sm pcom-send"
           onClick={send}
           disabled={sending || uploadingImage || !availability.available || (!input.trim() && !pendingImage && !pendingGift)}
-          aria-label="Send"
-          title="Send"
+          aria-label={t('msg.send')}
+          title={t('msg.send')}
         >
           <Icon name="send" size={16} />
         </button>
