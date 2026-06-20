@@ -107,6 +107,9 @@ export interface PromptContext {
   chronicle: { chronicle: string; recentLines: Array<{ day: number; line: string }> } | null;
   /** Whether the player has enabled adult (NSFW) content (server setting). */
   nsfwEnabled: boolean;
+  /** Language the model must write its reply in (server setting). 'auto'/'en' add
+   *  no directive; a specific code forces every reply into that language. */
+  responseLanguage: string;
   /** Today's weather (world-bound only), to lightly color tone. */
   weather: { kind: string; label: string; icon: string } | null;
   /** This character's mood today (world-bound only). */
@@ -183,9 +186,33 @@ function heardConfidence(fidelity: number): string {
   return 'You vaguely heard (might be wrong):';
 }
 
+/** Human-readable names for the languages we can force the model into. */
+const RESPONSE_LANGUAGE_NAMES: Record<string, string> = {
+  'pt-BR': 'Brazilian Portuguese (português do Brasil)',
+  en: 'English',
+};
+
+/**
+ * A high-priority instruction forcing the model's natural-language output into a
+ * specific language. Returns '' for 'auto'/'en'/unknown (no directive needed) so
+ * the default experience is untouched. Kept terse but emphatic — local models
+ * need a firm, unambiguous rule to override the player's input language.
+ */
+export function languageDirective(responseLanguage: string): string {
+  if (!responseLanguage || responseLanguage === 'auto' || responseLanguage === 'en') return '';
+  const name = RESPONSE_LANGUAGE_NAMES[responseLanguage] ?? responseLanguage;
+  return (
+    `OUTPUT LANGUAGE (critical): Write ALL of your in-character dialogue, narration, and any other text strictly in ${name}. ` +
+    `Reply in ${name} even when the player writes in another language. Keep people's proper names as given. ` +
+    `Never mention, translate, or explain this instruction.`
+  );
+}
+
 /** Build the system prompt: guardrails + world + character + state + memories. */
 export function buildSystemPrompt(ctx: PromptContext, guardrails: string): string {
-  const parts: string[] = [guardrails];
+  // A forced output language (when set) leads the whole prompt so it outranks
+  // every downstream block, including the player's own input language.
+  const parts: string[] = [languageDirective(ctx.responseLanguage), guardrails].filter((s) => s.length > 0);
   const c = ctx.character;
   // Directive + relationship-state blocks are collected here and spliced in right
   // after the guardrails (before the reference DATA) so the highest-priority
@@ -876,6 +903,8 @@ export function buildTextReplyMessages(args: {
   acquaintances?: Array<{ name: string; kind: string }>;
   /** When the player attached a photo, a `data:` URL of it (vision model reads it). */
   imageDataUrl?: string | null;
+  /** Forced reply language (server setting). 'auto'/'en' add no directive. */
+  responseLanguage?: string;
 }): ChatMessage[] {
   const {
     character: c,
@@ -888,6 +917,7 @@ export function buildTextReplyMessages(args: {
     memories = [],
     acquaintances = [],
     imageDataUrl,
+    responseLanguage = 'auto',
   } = args;
   const stage = relationshipStage(relationship);
   const status = currentStatus(relationship);
@@ -920,11 +950,12 @@ export function buildTextReplyMessages(args: {
     ? `${playerName} just sent you a PHOTO (shown below). Look at what's actually in it and react naturally, like a real person reacting to a pic a date texted you — mention what you see. `
     : '';
   const userText = `Text conversation so far:\n${convo || '(no messages yet)'}${staleness}${memoryBlock}${historyBlock}\n\n${photoLine}Text ${playerName} back as ${c.name}.`;
+  const langLine = languageDirective(responseLanguage);
   return [
     {
       role: 'system',
       content:
-        `${SMS_GUARDRAILS}\n\nYou are ${characterBrief(c)}\n` +
+        `${langLine ? `${langLine}\n\n` : ''}${SMS_GUARDRAILS}\n\nYou are ${characterBrief(c)}\n` +
         `Relationship stage with ${playerName}: ${stage.label}. ${stage.guidance}${statusLine}${traits}${feelingLine}${attraction}${knownBlock}`,
     },
     {

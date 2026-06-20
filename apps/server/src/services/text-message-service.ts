@@ -371,6 +371,7 @@ export async function sendPlayerText(
       memories,
       acquaintances: listAcquaintances(character),
       imageDataUrl,
+      responseLanguage: effectiveSettings.responseLanguage,
     }),
     { settings: effectiveSettings, task: 'Reply to the player’s text in character (short).', schemaName: 'TextReply' },
   );

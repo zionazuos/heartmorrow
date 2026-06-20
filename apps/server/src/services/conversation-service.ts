@@ -395,6 +395,7 @@ export function buildPromptContextForSession(
       return c ? { chronicle: c.chronicle, recentLines: c.recentLines } : null;
     })(),
     nsfwEnabled: getLlmSettings().nsfwEnabled,
+    responseLanguage: getLlmSettings().responseLanguage,
     weather: world && worldDay != null ? (() => { const w = weatherForDay(world.id, worldDay); return { kind: w.kind, label: w.label, icon: w.icon }; })() : null,
     characterMood:
       world && worldDay != null ? (() => { const m = moodForCharacter(world.id, worldDay, character); return { mood: m.mood, icon: m.icon }; })() : null,

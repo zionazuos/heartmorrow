@@ -293,6 +293,10 @@ export const ptBR: Record<MessageKey, string> = {
     "Com que frequência um encontro avalia como a sua última mensagem caiu (atualiza o clima + a expressão dele). 'Toda mensagem' é o mais responsivo; 'periodicamente' mantém as respostas mais ágeis com uma chamada a menos ao modelo por turno.",
   'settings.console.cadenceEvery': 'Toda mensagem',
   'settings.console.cadencePeriodic': 'Periodicamente (mais leve)',
+  'settings.console.replyLanguage': 'Idioma das respostas dos personagens',
+  'settings.console.replyLanguageHint':
+    'O idioma em que os personagens escrevem (diálogos, narração, mensagens). “Automático” segue o que você digita; uma escolha fixa força toda resposta naquele idioma. Funciona melhor com um modelo capaz. Separado do idioma da interface acima.',
+  'settings.console.replyLangAuto': 'Automático (seguir o jogador)',
   'settings.console.save': 'Salvar ajustes',
   'settings.console.test': 'Testar conexão',
   'settings.console.testing': 'Testando…',

@@ -292,6 +292,10 @@ export const en = {
     "How often a date reads how your last message landed (updates the vibe + their expression). 'Every message' is most responsive; 'periodic' keeps replies snappier with one fewer model call per turn.",
   'settings.console.cadenceEvery': 'Every message',
   'settings.console.cadencePeriodic': 'Periodically (lighter)',
+  'settings.console.replyLanguage': 'Character reply language',
+  'settings.console.replyLanguageHint':
+    'The language characters write in (dialogue, narration, texts). “Auto” follows whatever you type; a fixed choice forces every reply into that language. Best with a capable model. Separate from the interface language above.',
+  'settings.console.replyLangAuto': 'Auto (follow the player)',
   'settings.console.save': 'Save settings',
   'settings.console.test': 'Test connection',
   'settings.console.testing': 'Testing…',

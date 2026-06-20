@@ -8,6 +8,7 @@ import {
   type LlmHealthResult,
   type StructuredOutputMode,
   type EndpointMode,
+  type ResponseLanguage,
 } from '@dsim/shared';
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
@@ -29,6 +30,7 @@ interface Form {
   omitSchemaInPrompt: boolean;
   endpointMode: EndpointMode;
   maxRetries: number;
+  responseLanguage: ResponseLanguage;
   nsfwEnabled: boolean;
   rapportCadence: 'every' | 'periodic';
   tragicOutcomesEnabled: boolean;
@@ -94,6 +96,7 @@ export function Settings() {
           omitSchemaInPrompt: s.omitSchemaInPrompt,
           endpointMode: s.endpointMode,
           maxRetries: s.maxRetries,
+          responseLanguage: s.responseLanguage,
           nsfwEnabled: s.nsfwEnabled,
           rapportCadence: s.rapportCadence,
           tragicOutcomesEnabled: s.tragicOutcomesEnabled,
@@ -121,6 +124,7 @@ export function Settings() {
       omitSchemaInPrompt: form.omitSchemaInPrompt,
       endpointMode: form.endpointMode,
       maxRetries: form.maxRetries,
+      responseLanguage: form.responseLanguage,
       nsfwEnabled: form.nsfwEnabled,
       rapportCadence: form.rapportCadence,
       tragicOutcomesEnabled: form.tragicOutcomesEnabled,
@@ -500,6 +504,16 @@ export function Settings() {
               <select value={form.rapportCadence} onChange={(e) => set('rapportCadence', e.target.value as 'every' | 'periodic')}>
                 <option value="every">{t('settings.console.cadenceEvery')}</option>
                 <option value="periodic">{t('settings.console.cadencePeriodic')}</option>
+              </select>
+            </Field>
+            <Field label={t('settings.console.replyLanguage')} hint={t('settings.console.replyLanguageHint')}>
+              <select value={form.responseLanguage} onChange={(e) => set('responseLanguage', e.target.value as ResponseLanguage)}>
+                <option value="auto">{t('settings.console.replyLangAuto')}</option>
+                {Object.entries(LOCALES).map(([code, name]) => (
+                  <option key={code} value={code}>
+                    {name}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>

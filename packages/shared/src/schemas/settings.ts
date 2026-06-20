@@ -19,6 +19,17 @@ export const EndpointModeSchema = z.enum([
 ]);
 export type EndpointMode = z.infer<typeof EndpointModeSchema>;
 
+/**
+ * The language the MODEL should write in — character dialogue, narration, and
+ * text replies. 'auto' leaves the model to follow the player's language (its
+ * default behavior); a specific code forces every reply into that language no
+ * matter what the player types. Separate from the UI language (which is a
+ * browser-only setting): you can read the app in Portuguese while characters
+ * reply in English, or vice-versa.
+ */
+export const ResponseLanguageSchema = z.enum(['auto', 'en', 'pt-BR']);
+export type ResponseLanguage = z.infer<typeof ResponseLanguageSchema>;
+
 export const LlmSettingsSchema = z.object({
   baseUrl: z
     .string()
@@ -48,6 +59,12 @@ export const LlmSettingsSchema = z.object({
   omitSchemaInPrompt: z.boolean().default(false),
   endpointMode: EndpointModeSchema.default('chat_completions'),
   maxRetries: z.number().int().min(0).max(10).default(3),
+  /**
+   * Language the model writes its replies in (dialogue, narration, texts). 'auto'
+   * (default) keeps the model's own behavior of following the player; a specific
+   * code forces that language regardless of what the player types.
+   */
+  responseLanguage: ResponseLanguageSchema.default('auto'),
   /**
    * When true, the SERVER permits mature/explicit content in date dialogue —
    * but ONLY once the relationship is advanced enough (see `intimacyAllowed`);
