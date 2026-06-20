@@ -11,6 +11,7 @@ import {
 import { api } from '../../lib/api';
 import { useAsync, errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
+import { useT, type TFunc } from '../../i18n';
 import { Banner, Empty, Field, Loader, ConfirmDialog } from '../ui';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
@@ -44,11 +45,13 @@ function CompanyRow({
   activeWorldId,
   tradingId,
   onTrade,
+  t,
 }: {
   view: MarketCompanyView;
   activeWorldId: string;
   tradingId: string | null;
   onTrade: (companyId: string, action: 'buy' | 'sell', shares: number) => void;
+  t: TFunc;
 }) {
   const { company, price, pct, shares } = view;
   const [buyQty, setBuyQty] = useState(1);
@@ -76,10 +79,10 @@ function CompanyRow({
       {company.description && <p className="mkt-desc">{company.description}</p>}
       <div className="mkt-row-meta">
         {company.dividendPerShare > 0 && (
-          <span className="mkt-dividend">pays ◈{company.dividendPerShare}/day per share</span>
+          <span className="mkt-dividend">{t('mkt.dividend', { amount: company.dividendPerShare })}</span>
         )}
         {shares > 0 && (
-          <span className="mkt-held">You hold {shares} share{shares !== 1 ? 's' : ''}</span>
+          <span className="mkt-held">{t(shares === 1 ? 'mkt.youHoldOne' : 'mkt.youHoldMany', { count: shares })}</span>
         )}
       </div>
       <div className="mkt-trade-row">
@@ -96,7 +99,7 @@ function CompanyRow({
             disabled={busy}
             onClick={() => onTrade(company.id, 'buy', buyQty)}
           >
-            {tradingId === company.id + '-buy' ? 'Buying…' : 'Buy'}
+            {tradingId === company.id + '-buy' ? t('mkt.buying') : t('mkt.buy')}
           </button>
         </div>
         {shares > 0 && (
@@ -114,7 +117,7 @@ function CompanyRow({
               disabled={busy}
               onClick={() => onTrade(company.id, 'sell', Math.min(sellQty, shares))}
             >
-              {tradingId === company.id + '-sell' ? 'Selling…' : 'Sell'}
+              {tradingId === company.id + '-sell' ? t('mkt.selling') : t('mkt.sell')}
             </button>
           </div>
         )}
@@ -135,16 +138,16 @@ function NewsCard({ item }: { item: MarketNews }) {
 }
 
 /* ── Portfolio position row ───────────────────────────────────────────── */
-function PositionRow({ pos }: { pos: PortfolioPosition }) {
+function PositionRow({ pos, t }: { pos: PortfolioPosition; t: TFunc }) {
   return (
     <div className="mkt-pos-row">
       <div className="mkt-pos-head">
         <span className="mkt-ticker">{pos.company.ticker}</span>
-        <span className="mkt-pos-shares">{pos.shares} sh</span>
+        <span className="mkt-pos-shares">{t('mkt.shAbbr', { count: pos.shares })}</span>
         <span className="mkt-pos-value">◈ {pos.value}</span>
       </div>
       <div className="mkt-pos-detail">
-        <span className="mkt-pos-basis">basis ◈ {pos.costBasis}</span>
+        <span className="mkt-pos-basis">{t('mkt.basis', { value: pos.costBasis })}</span>
         <span className={`mkt-pos-pnl ${pnlClass(pos.pnl)}`}>{pos.pnl >= 0 ? '+' : ''}◈ {pos.pnl}</span>
       </div>
     </div>
@@ -157,11 +160,13 @@ function DraftCard({
   index,
   onToggle,
   onEdit,
+  t,
 }: {
   draft: CompanyDraft;
   index: number;
   onToggle: (i: number) => void;
   onEdit: (i: number, patch: Partial<CompanyCreate>) => void;
+  t: TFunc;
 }) {
   const { company, keep } = draft;
   return (
@@ -169,15 +174,15 @@ function DraftCard({
       <div className="mkt-draft-top">
         <label className="mkt-draft-keep">
           <input type="checkbox" checked={keep} onChange={() => onToggle(index)} />
-          {keep ? 'Keep' : 'Skipped'}
+          {keep ? t('mkt.keep') : t('mkt.skipped')}
         </label>
         <span className="mkt-money-pill">◈ {company.basePrice}</span>
       </div>
       <div className="inline-fields">
-        <Field label="Name">
+        <Field label={t('mkt.name')}>
           <input value={company.name} onChange={(e) => onEdit(index, { name: e.target.value })} />
         </Field>
-        <Field label="Ticker">
+        <Field label={t('mkt.ticker')}>
           <input
             value={company.ticker}
             maxLength={6}
@@ -186,7 +191,7 @@ function DraftCard({
         </Field>
       </div>
       <div className="inline-fields">
-        <Field label="Sector">
+        <Field label={t('mkt.sector')}>
           <select
             value={company.sector}
             onChange={(e) => onEdit(index, { sector: e.target.value as StockSector })}
@@ -196,7 +201,7 @@ function DraftCard({
             ))}
           </select>
         </Field>
-        <Field label="Base price (◈)">
+        <Field label={t('mkt.basePrice')}>
           <input
             type="number"
             min={1}
@@ -206,7 +211,7 @@ function DraftCard({
         </Field>
       </div>
       <div className="inline-fields">
-        <Field label="Volatility (0–0.15)">
+        <Field label={t('mkt.volatility')}>
           <input
             type="number"
             min={0}
@@ -216,7 +221,7 @@ function DraftCard({
             onChange={(e) => onEdit(index, { volatility: Math.max(0, Math.min(0.15, Number(e.target.value) || 0)) })}
           />
         </Field>
-        <Field label="Dividend/share">
+        <Field label={t('mkt.dividendShare')}>
           <input
             type="number"
             min={0}
@@ -225,7 +230,7 @@ function DraftCard({
           />
         </Field>
       </div>
-      <Field label="Description">
+      <Field label={t('mkt.description')}>
         <textarea
           value={company.description ?? ''}
           onChange={(e) => onEdit(index, { description: e.target.value })}
@@ -237,6 +242,7 @@ function DraftCard({
 
 /* ── Main component ───────────────────────────────────────────────────── */
 export function MarketApp() {
+  const t = useT();
   const { player, reloadPlayer, creatorMode, activeWorld, activeWorldId, dayTick } = useAppData();
 
   const [tab, setTab] = useState<Tab>('market');
@@ -289,10 +295,10 @@ export function MarketApp() {
   if (!activeWorldId) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title="Market" kicker="Stock exchange" icon="coin" />
+        <PhoneAppBar title={t('phone.app.market')} kicker={t('mkt.kicker')} icon="coin" />
         <div className="mkt-scroll">
-          <Empty icon={<Icon name="coin" size={34} />} title="No world active">
-            <p className="muted">Select a world to view the market.</p>
+          <Empty icon={<Icon name="coin" size={34} />} title={t('phone.weather.noWorldTitle')}>
+            <p className="muted">{t('mkt.noWorldBody')}</p>
           </Empty>
         </div>
       </div>
@@ -313,7 +319,14 @@ export function MarketApp() {
       await reloadPlayer();
       marketState.reload();
       portfolioState.reload();
-      setNote(`${action === 'buy' ? 'Bought' : 'Sold'} ${shares} share${shares !== 1 ? 's' : ''} @ ◈ ${res.price}.`);
+      setNote(
+        t(
+          action === 'buy'
+            ? shares === 1 ? 'mkt.tradeBoughtOne' : 'mkt.tradeBoughtMany'
+            : shares === 1 ? 'mkt.tradeSoldOne' : 'mkt.tradeSoldMany',
+          { count: shares, price: res.price },
+        ),
+      );
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -355,7 +368,7 @@ export function MarketApp() {
       if (res.ok) {
         setDrafts(res.data.map((c) => ({ keep: true, company: c })));
       } else {
-        setError(`Generation failed: ${res.error}`);
+        setError(t('mkt.genFailed', { error: res.error }));
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -376,7 +389,7 @@ export function MarketApp() {
     try {
       const kept = drafts.filter((d) => d.keep).map((d) => d.company);
       for (const c of kept) await api.createCompany({ ...c, worldId: activeWorldId });
-      setNote(`Saved ${kept.length} compan${kept.length === 1 ? 'y' : 'ies'} to the market.`);
+      setNote(t(kept.length === 1 ? 'mkt.savedOne' : 'mkt.savedMany', { count: kept.length }));
       setGenOpen(false);
       setDrafts([]);
       marketState.reload();
@@ -394,7 +407,7 @@ export function MarketApp() {
     setError(undefined);
     try {
       await api.createCompany({ ...newForm, worldId: activeWorldId });
-      setNote(`Created ${newForm.ticker}.`);
+      setNote(t('mkt.created', { ticker: newForm.ticker }));
       setNewForm({ name: '', ticker: '', sector: 'tech', basePrice: 100, volatility: 0.04, dividendPerShare: 0, description: '', linkedCharacterId: null, assetId: null });
       marketState.reload();
     } catch (e) {
@@ -408,12 +421,12 @@ export function MarketApp() {
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title="Market" kicker="Stock exchange" icon="coin" />
+      <PhoneAppBar title={t('phone.app.market')} kicker={t('mkt.kicker')} icon="coin" />
 
       <div className="mkt-scroll">
         {/* ── Purse strip ─────────────────────────────────────────────── */}
         <div className="mkt-purse-bar">
-          <span className="mkt-purse-label">Cash</span>
+          <span className="mkt-purse-label">{t('mkt.cash')}</span>
           <span className="mkt-purse-coin">◈ {money}</span>
         </div>
 
@@ -429,7 +442,7 @@ export function MarketApp() {
             aria-selected={tab === 'market'}
             onClick={() => setTab('market')}
           >
-            <Icon name="coin" size={14} /> Market
+            <Icon name="coin" size={14} /> {t('mkt.tabMarket')}
           </button>
           <button
             className={`mkt-tab${tab === 'portfolio' ? ' active' : ''}`}
@@ -437,7 +450,7 @@ export function MarketApp() {
             aria-selected={tab === 'portfolio'}
             onClick={() => setTab('portfolio')}
           >
-            <Icon name="trophy" size={14} /> Portfolio
+            <Icon name="trophy" size={14} /> {t('mkt.tabPortfolio')}
           </button>
         </div>
 
@@ -451,12 +464,12 @@ export function MarketApp() {
               <div className="mkt-creator framed stack">
                 <div className="mkt-creator-head">
                   <div>
-                    <div className="kicker">Creator Workshop</div>
-                    <h3 style={{ margin: 0 }}>Companies</h3>
+                    <div className="kicker">{t('mkt.workshop')}</div>
+                    <h3 style={{ margin: 0 }}>{t('mkt.companies')}</h3>
                   </div>
                   {!genOpen && (
                     <button className="btn sm primary" onClick={() => setGenOpen(true)}>
-                      <Icon name="generate" size={14} /> Generate
+                      <Icon name="generate" size={14} /> {t('mkt.generate')}
                     </button>
                   )}
                 </div>
@@ -464,13 +477,13 @@ export function MarketApp() {
                 {genOpen && (
                   <div className="mkt-gen stack">
                     <div className="mkt-gen-header">
-                      <div className="kicker">Generate from world lore</div>
+                      <div className="kicker">{t('mkt.genFromLore')}</div>
                       <button className="btn ghost sm" onClick={() => { setGenOpen(false); setDrafts([]); }}>
                         <Icon name="close" size={14} />
                       </button>
                     </div>
                     <div className="inline-fields">
-                      <Field label="Count (1–8)">
+                      <Field label={t('mkt.count')}>
                         <input
                           type="number"
                           min={1}
@@ -479,39 +492,39 @@ export function MarketApp() {
                           onChange={(e) => setGenForm({ ...genForm, count: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })}
                         />
                       </Field>
-                      <Field label="Sector hint">
+                      <Field label={t('mkt.sectorHint')}>
                         <select
                           value={genForm.sectorHint}
                           onChange={(e) => setGenForm({ ...genForm, sectorHint: e.target.value as '' | StockSector })}
                         >
-                          <option value="">— any —</option>
+                          <option value="">{t('mkt.any')}</option>
                           {SECTORS.map((s) => (
                             <option key={s} value={s}>{STOCK_SECTOR_LABELS[s]}</option>
                           ))}
                         </select>
                       </Field>
                     </div>
-                    <Field label="Theme / guidance" hint="Optional — e.g. ‘high-tech guild economy’ or ‘frontier trading posts’.">
+                    <Field label={t('mkt.theme')} hint={t('mkt.themeHint')}>
                       <textarea
                         value={genForm.theme}
-                        placeholder="Describe the companies you want…"
+                        placeholder={t('mkt.themePlaceholder')}
                         onChange={(e) => setGenForm({ ...genForm, theme: e.target.value })}
                       />
                     </Field>
                     <div className="row">
                       <button className="btn primary" onClick={generate} disabled={generating}>
-                        {generating ? 'Generating…' : <><Icon name="generate" size={14} /> Generate</>}
+                        {generating ? t('editor.generating') : <><Icon name="generate" size={14} /> {t('mkt.generate')}</>}
                       </button>
                       {drafts.length > 0 && (
                         <button className="btn" onClick={saveDrafts} disabled={saving || keptCount === 0}>
-                          {saving ? 'Saving…' : `Save ${keptCount} selected`}
+                          {saving ? t('common.saving') : t('mkt.saveSelected', { count: keptCount })}
                         </button>
                       )}
                     </div>
 
                     {drafts.length > 0 && (
                       <>
-                        <div className="mkt-gen-divider">Review &amp; refine</div>
+                        <div className="mkt-gen-divider">{t('mkt.reviewRefine')}</div>
                         <div className="mkt-drafts">
                           {drafts.map((d, i) => (
                             <DraftCard
@@ -520,6 +533,7 @@ export function MarketApp() {
                               index={i}
                               onToggle={toggleDraft}
                               onEdit={editDraft}
+                              t={t}
                             />
                           ))}
                         </div>
@@ -530,16 +544,16 @@ export function MarketApp() {
 
                 {/* Manual new-company form */}
                 <div className="mkt-new-form stack">
-                  <div className="kicker">New company</div>
+                  <div className="kicker">{t('mkt.newCompany')}</div>
                   <div className="inline-fields">
-                    <Field label="Name">
+                    <Field label={t('mkt.name')}>
                       <input
                         value={newForm.name}
                         placeholder="Apex Corp"
                         onChange={(e) => setNewForm({ ...newForm, name: e.target.value })}
                       />
                     </Field>
-                    <Field label="Ticker">
+                    <Field label={t('mkt.ticker')}>
                       <input
                         value={newForm.ticker}
                         placeholder="APEX"
@@ -549,7 +563,7 @@ export function MarketApp() {
                     </Field>
                   </div>
                   <div className="inline-fields">
-                    <Field label="Sector">
+                    <Field label={t('mkt.sector')}>
                       <select
                         value={newForm.sector}
                         onChange={(e) => setNewForm({ ...newForm, sector: e.target.value as StockSector })}
@@ -559,7 +573,7 @@ export function MarketApp() {
                         ))}
                       </select>
                     </Field>
-                    <Field label="Base price (◈)">
+                    <Field label={t('mkt.basePrice')}>
                       <input
                         type="number"
                         min={1}
@@ -569,7 +583,7 @@ export function MarketApp() {
                     </Field>
                   </div>
                   <div className="inline-fields">
-                    <Field label="Volatility (0–0.15)">
+                    <Field label={t('mkt.volatility')}>
                       <input
                         type="number"
                         min={0}
@@ -579,7 +593,7 @@ export function MarketApp() {
                         onChange={(e) => setNewForm({ ...newForm, volatility: Math.max(0, Math.min(0.15, Number(e.target.value) || 0)) })}
                       />
                     </Field>
-                    <Field label="Dividend/share">
+                    <Field label={t('mkt.dividendShare')}>
                       <input
                         type="number"
                         min={0}
@@ -588,10 +602,10 @@ export function MarketApp() {
                       />
                     </Field>
                   </div>
-                  <Field label="Description">
+                  <Field label={t('mkt.description')}>
                     <textarea
                       value={newForm.description ?? ''}
-                      placeholder="What does this company do?"
+                      placeholder={t('mkt.descPlaceholder')}
                       onChange={(e) => setNewForm({ ...newForm, description: e.target.value })}
                     />
                   </Field>
@@ -600,7 +614,7 @@ export function MarketApp() {
                     onClick={createNew}
                     disabled={creatingNew || !newForm.name.trim() || !newForm.ticker.trim()}
                   >
-                    <Icon name="plus" size={15} /> {creatingNew ? 'Creating…' : 'Create company'}
+                    <Icon name="plus" size={15} /> {creatingNew ? t('mkt.creating') : t('mkt.createCompany')}
                   </button>
                 </div>
               </div>
@@ -610,17 +624,15 @@ export function MarketApp() {
             <Loader state={marketState}>
               {(market) =>
                 market.companies.length === 0 ? (
-                  <Empty icon={<Icon name="coin" size={34} />} title="No companies listed">
+                  <Empty icon={<Icon name="coin" size={34} />} title={t('mkt.noCompaniesTitle')}>
                     <p className="muted">
-                      {creatorMode
-                        ? 'Use the creator workshop above to add companies.'
-                        : 'No companies are trading in this world yet.'}
+                      {creatorMode ? t('mkt.noCompaniesCreator') : t('mkt.noCompaniesPlay')}
                     </p>
                   </Empty>
                 ) : (
                   <>
                     <div className="mkt-eyebrow">
-                      <Icon name="coin" size={12} /> Listings · {market.companies.length} compan{market.companies.length === 1 ? 'y' : 'ies'}
+                      <Icon name="coin" size={12} /> {t(market.companies.length === 1 ? 'mkt.listingsOne' : 'mkt.listingsMany', { count: market.companies.length })}
                     </div>
                     <div className="mkt-board">
                       {market.companies.map((view) => (
@@ -630,12 +642,13 @@ export function MarketApp() {
                             activeWorldId={activeWorldId}
                             tradingId={tradingId}
                             onTrade={trade}
+                            t={t}
                           />
                           {creatorMode && (
                             <button
                               className="btn danger ghost sm mkt-delete-btn"
-                              title="Delete company"
-                              aria-label={`Delete ${view.company.name}`}
+                              title={t('mkt.deleteCompany')}
+                              aria-label={t('mkt.deleteAria', { name: view.company.name })}
                               onClick={() => setPendingDelete(view.company)}
                             >
                               <Icon name="trash" size={14} />
@@ -649,7 +662,7 @@ export function MarketApp() {
                     {market.news.length > 0 && (
                       <>
                         <div className="mkt-eyebrow">
-                          <Icon name="chronicle" size={12} /> Recent headlines
+                          <Icon name="chronicle" size={12} /> {t('mkt.headlines')}
                         </div>
                         <div className="mkt-news-list">
                           {market.news.map((item) => (
@@ -672,27 +685,27 @@ export function MarketApp() {
           <Loader state={portfolioState}>
             {(portfolio) =>
               portfolio.positions.length === 0 ? (
-                <Empty icon={<Icon name="trophy" size={34} />} title="No holdings">
-                  <p className="muted">Buy shares from the Market tab to build your portfolio.</p>
+                <Empty icon={<Icon name="trophy" size={34} />} title={t('mkt.noHoldingsTitle')}>
+                  <p className="muted">{t('mkt.noHoldingsBody')}</p>
                 </Empty>
               ) : (
                 <>
                   <div className="mkt-portfolio-summary framed">
                     <div className="mkt-port-stat">
-                      <span className="mkt-port-label">Portfolio value</span>
+                      <span className="mkt-port-label">{t('mkt.portfolioValue')}</span>
                       <span className="mkt-port-value">◈ {portfolio.value}</span>
                     </div>
                     <div className="mkt-port-stat">
-                      <span className="mkt-port-label">Cash</span>
+                      <span className="mkt-port-label">{t('mkt.cash')}</span>
                       <span className="mkt-port-value">◈ {portfolio.cash}</span>
                     </div>
                   </div>
                   <div className="mkt-eyebrow">
-                    <Icon name="trophy" size={12} /> Positions · {portfolio.positions.length}
+                    <Icon name="trophy" size={12} /> {t('mkt.positions', { count: portfolio.positions.length })}
                   </div>
                   <div className="mkt-positions">
                     {portfolio.positions.map((pos) => (
-                      <PositionRow key={pos.company.id} pos={pos} />
+                      <PositionRow key={pos.company.id} pos={pos} t={t} />
                     ))}
                   </div>
                 </>
@@ -704,9 +717,9 @@ export function MarketApp() {
 
       {pendingDelete && (
         <ConfirmDialog
-          title={`Delete ${pendingDelete.name}?`}
-          body="This removes the company from the market. Existing holdings are not refunded."
-          confirmLabel="Delete"
+          title={t('people.delete.title', { name: pendingDelete.name })}
+          body={t('mkt.deleteBody')}
+          confirmLabel={t('common.delete')}
           danger
           busy={deleting}
           onConfirm={() => removeCompany(pendingDelete)}
