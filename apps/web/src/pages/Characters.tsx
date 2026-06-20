@@ -7,9 +7,11 @@ import { Portrait } from '../components/Portrait';
 import { Icon } from '../components/Icon';
 import { Banner, Empty, Loader, ConfirmDialog } from '../components/ui';
 import { useAppData } from '../state/app-context';
+import { useT } from '../i18n';
 
 export function Characters() {
   const nav = useNavigate();
+  const t = useT();
   const { creatorMode, activeWorldId, activeWorld, dayTick } = useAppData();
   const state = useAsync(() => api.listCharacters(), [activeWorldId, dayTick]);
   const memorials = useAsync(() => api.listMemorials(activeWorldId ?? undefined), [activeWorldId, dayTick]);
@@ -62,13 +64,13 @@ export function Characters() {
     <div className="stack">
       <div className="page-head ppl-head">
         <div className="ppl-titles">
-          <span className="kicker">The Almanac · Cast</span>
-          <h1>People</h1>
-          <p>The hearts you keep close — every face you can call on for a date.</p>
+          <span className="kicker">{t('people.head.kicker')}</span>
+          <h1>{t('people.head.title')}</h1>
+          <p>{t('people.head.lede')}</p>
         </div>
         {creatorMode && (
           <Link className="btn primary" to="/characters/new">
-            <Icon name="plus" size={16} /> New
+            <Icon name="plus" size={16} /> {t('common.new')}
           </Link>
         )}
       </div>
@@ -83,23 +85,23 @@ export function Characters() {
           return (
             <>
               {characters.length === 0 ? (
-            <Empty icon={<Icon name="people" size={34} />} title="No one in your life yet">
+            <Empty icon={<Icon name="people" size={34} />} title={t('people.empty.title')}>
               {creatorMode ? (
                 <>
-                  <p>Bring someone into being to start dating.</p>
+                  <p>{t('people.empty.createLede')}</p>
                   <Link className="btn primary" to="/characters/new">
-                    Create your first character
+                    {t('people.empty.createBtn')}
                   </Link>
                 </>
               ) : (
-                <p>Switch to Creator mode (Phone → Settings) to add characters.</p>
+                <p>{t('people.empty.playLede')}</p>
               )}
             </Empty>
           ) : (
             <>
               <div className="ppl-count">
                 <span className="ppl-num">{characters.length}</span>{' '}
-                {characters.length === 1 ? 'soul' : 'souls'} in your almanac
+                {t(characters.length === 1 ? 'people.soulsOne' : 'people.soulsMany')}
               </div>
               <div className="ppl-gallery">
                 {characters.map((c) => {
@@ -118,7 +120,7 @@ export function Characters() {
                       </h3>
                       <div className="ppl-meta">
                         {memorial ? (
-                          <span className="ppl-inmemoriam">In memoriam</span>
+                          <span className="ppl-inmemoriam">{t('people.inMemoriam')}</span>
                         ) : (
                           <>
                             {c.age}
@@ -136,29 +138,29 @@ export function Characters() {
                         ? c.shortDescription.length > 90
                           ? `${c.shortDescription.slice(0, 90).trimEnd()}…`
                           : c.shortDescription
-                        : 'No description yet.'}
+                        : t('people.noDesc')}
                     </p>
 
                     <div className="ppl-actions">
                       {memorial ? (
                         <Link className="btn sm ghost ppl-date" to={`/characters/${c.id}`}>
-                          <Icon name="remember" size={15} /> Remember
+                          <Icon name="remember" size={15} /> {t('people.remember')}
                         </Link>
                       ) : (
                         <Link className="btn sm primary ppl-date" to={`/chat?character=${c.id}`}>
-                          <Icon name="date" size={15} /> Date
+                          <Icon name="date" size={15} /> {t('people.date')}
                         </Link>
                       )}
                       {creatorMode && (
                         <div className="ppl-creator-row">
                           <Link className="btn sm ghost" to={`/characters/${c.id}/edit`}>
-                            <Icon name="edit" size={14} /> Edit
+                            <Icon name="edit" size={14} /> {t('common.edit')}
                           </Link>
                           <button className="btn sm ghost" onClick={() => duplicate(c.id)} disabled={actingId !== null}>
-                            <Icon name="duplicate" size={14} /> Duplicate
+                            <Icon name="duplicate" size={14} /> {t('common.duplicate')}
                           </button>
                           <button className="btn sm danger" onClick={() => setPendingDelete({ id: c.id, name: c.name })}>
-                            <Icon name="trash" size={14} /> Delete
+                            <Icon name="trash" size={14} /> {t('common.delete')}
                           </button>
                         </div>
                       )}
@@ -174,14 +176,16 @@ export function Characters() {
                 <section className="stack" style={{ marginTop: 24 }}>
                   <div className="section-head">
                     <div className="titles">
-                      <span className="kicker">Not in any world</span>
-                      <h2>Unassigned characters</h2>
+                      <span className="kicker">{t('people.unassigned.kicker')}</span>
+                      <h2>{t('people.unassigned.title')}</h2>
                     </div>
                     <span className="trail" />
                   </div>
                   <p className="muted" style={{ marginTop: -6 }}>
-                    These belong to no world, so they don't show in any roster.
-                    {activeWorld ? ` Place one into ${activeWorld.name} to start dating them.` : ' Enter a world to place them.'}
+                    {t('people.unassigned.lede')}
+                    {activeWorld
+                      ? t('people.unassigned.place', { world: activeWorld.name })
+                      : t('people.unassigned.placeNoWorld')}
                   </p>
                   <div className="ppl-gallery">
                     {unassigned.map((c) => (
@@ -207,14 +211,14 @@ export function Characters() {
                             disabled={!activeWorldId || actingId !== null}
                             onClick={() => moveToWorld(c.id)}
                           >
-                            <Icon name="plus" size={15} /> Move to {activeWorld?.name ?? 'world'}
+                            <Icon name="plus" size={15} /> {t('people.moveTo', { world: activeWorld?.name ?? t('people.worldFallback') })}
                           </button>
                           <div className="ppl-creator-row">
                             <Link className="btn sm ghost" to={`/characters/${c.id}/edit`}>
-                              <Icon name="edit" size={14} /> Edit
+                              <Icon name="edit" size={14} /> {t('common.edit')}
                             </Link>
                             <button className="btn sm danger" onClick={() => setPendingDelete({ id: c.id, name: c.name })}>
-                              <Icon name="trash" size={14} /> Delete
+                              <Icon name="trash" size={14} /> {t('common.delete')}
                             </button>
                           </div>
                         </div>
@@ -231,9 +235,9 @@ export function Characters() {
 
       {pendingDelete && (
         <ConfirmDialog
-          title={`Delete ${pendingDelete.name}?`}
-          body="This removes their memories and your relationship too. This can't be undone."
-          confirmLabel="Delete"
+          title={t('people.delete.title', { name: pendingDelete.name })}
+          body={t('people.delete.body')}
+          confirmLabel={t('common.delete')}
           danger
           busy={deleting}
           onConfirm={() => remove(pendingDelete.id)}
