@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
@@ -51,6 +53,22 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     list: false,
   });
 
+  // Serve the built web client (apps/web/dist) when it exists, so the whole app
+  // can run as a single process on a single port. In dev the folder is absent
+  // and Vite serves the client, so this branch is simply skipped.
+  const webEnabled = config.serveWeb && fs.existsSync(path.join(config.webDir, 'index.html'));
+  if (webEnabled) {
+    await app.register(fastifyStatic, {
+      root: config.webDir,
+      prefix: '/',
+      index: ['index.html'],
+      list: false,
+      // Long-cache the fingerprinted assets Vite emits under /assets/.
+      maxAge: '1y',
+      immutable: true,
+    });
+  }
+
   app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
     if (err instanceof AppError) {
       reply.code(err.statusCode).send({ error: err.message, details: err.details });
@@ -87,6 +105,18 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     },
     { prefix: '/api' },
   );
+
+  // SPA deep-link fallback: any GET that isn't an API/uploads route or a real
+  // static file falls back to index.html so client-side routes (e.g. /settings)
+  // work on a hard refresh. API misses still return a JSON 404.
+  if (webEnabled) {
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/uploads')) {
+        return reply.type('text/html').sendFile('index.html');
+      }
+      reply.code(404).send({ error: 'Not found.' });
+    });
+  }
 
   return app;
 }

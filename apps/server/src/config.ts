@@ -86,6 +86,16 @@ export const config = {
     .map((s) => s.trim())
     .filter(Boolean),
   llmDefaults: buildEnvLlmDefaults(),
+  /**
+   * Directory of the built web client (`apps/web/dist`). When this folder
+   * exists (i.e. after `pnpm build`), the server serves the SPA itself so the
+   * whole app runs as a single process on a single port — handy for hosting it
+   * as a self-contained web server (Docker, a Proxmox LXC, etc.). In dev the
+   * folder is absent, so this is a no-op and Vite serves the client instead.
+   * Override with WEB_DIR; set SERVE_WEB=0 to disable serving even if it exists.
+   */
+  webDir: resolveDir(process.env.WEB_DIR, path.join(REPO_ROOT, 'apps/web/dist')),
+  serveWeb: process.env.SERVE_WEB !== '0',
 } as const;
 
 /** Ensure data + uploads directories exist. Safe to call repeatedly. */
