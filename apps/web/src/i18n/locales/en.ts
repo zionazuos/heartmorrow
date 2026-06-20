@@ -671,6 +671,60 @@ export const en = {
   'settings.tragicModal.ack':
     'I understand this content deals with suicide as a consequence of in-game abuse, and I want it enabled. I can turn it off at any time.',
   'settings.tragicModal.confirm': 'Enable tragic outcomes',
+
+  // --- Phone shell + app names --------------------------------------------
+  'phone.app.messages': 'Messages',
+  'phone.app.mail': 'Mail',
+  'phone.app.faces': 'Faces',
+  'phone.app.moments': 'Moments',
+  'phone.app.calendar': 'Almanac',
+  'phone.app.social': 'Social',
+  'phone.app.weather': 'Weather',
+  'phone.app.endings': 'Endings',
+  'phone.app.work': 'Work',
+  'phone.app.property': 'Property',
+  'phone.app.market': 'Market',
+  'phone.app.gambling': 'Casino',
+  'phone.app.shop': 'Shop',
+  'phone.app.games': 'Games',
+  'phone.app.bag': 'Bag',
+  'phone.app.settings': 'Settings',
+  'phone.status.almanac': 'The Almanac',
+  'phone.phaseFallback': 'Twilight',
+  'phone.greetingEyebrow': '{phase} · the almanac of the heart',
+  'phone.hint': 'Texts and mail arrive as the days pass.',
+  'phone.batteryAria': 'Battery {pct}%',
+
+  // --- Phone · Endings -----------------------------------------------------
+  'phone.endings.kicker': 'Happy Endings',
+  'phone.endings.emptyTitle': 'No endings yet',
+  'phone.endings.emptyBody':
+    "See a relationship all the way through — move in together and stay deeply in love — to reach a happy ending. It's a celebration, not a finish: you can always keep playing.",
+  'phone.endings.plateTitle': 'Treasured Epilogues',
+  'phone.endings.by': '{name} · Day {day}',
+
+  // --- Phone · Weather -----------------------------------------------------
+  'phone.weather.today': 'Today',
+  'phone.weather.noWorldTitle': 'No active world',
+  'phone.weather.noWorldBody': 'Pick or create a world to see its weather.',
+  'phone.weather.todayOver': 'Today over the world',
+  'phone.weather.itsLabel': "It's {label}",
+  'phone.weather.weekAhead': 'The week ahead',
+  'phone.weather.howFeeling': "How everyone's feeling",
+  'phone.weather.noOne': 'No one lives in this world yet.',
+  'phone.weather.lovesIt': 'loves it ☀️',
+  'phone.weather.lovesTitle': "loves today's weather",
+  'phone.weather.notFan': 'not a fan ☔',
+  'phone.weather.dislikesTitle': "dislikes today's weather",
+  'phone.weather.tasteHint': "Set characters' favorite / disliked weather in the editor to see stronger reactions.",
+
+  // --- Phone · Mail --------------------------------------------------------
+  'phone.mail.inbox': 'Inbox',
+  'phone.mail.reading': 'Reading',
+  'phone.mail.backInbox': 'Back to inbox',
+  'phone.mail.emptyTitle': 'No mail yet',
+  'phone.mail.emptyBody': 'In-world letters and notices arrive as the days pass.',
+  'common.refresh': 'Refresh',
 } as const;
 
 /** A union of every valid message key — used to type `t()` and the locales. */

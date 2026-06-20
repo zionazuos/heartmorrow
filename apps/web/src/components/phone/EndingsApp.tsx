@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Character, CharacterEnding } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { useAppData } from '../../state/app-context';
+import { useT } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Portrait } from '../Portrait';
@@ -10,6 +11,7 @@ import './phone-keepsakes.css';
 
 /** The "happy endings" gallery — keepsake epilogues of relationships you've seen through. */
 export function EndingsApp() {
+  const t = useT();
   const { activeWorldId, dayTick } = useAppData();
   const [endings, setEndings] = useState<CharacterEnding[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -32,20 +34,17 @@ export function EndingsApp() {
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title="Endings" kicker="Happy Endings" icon="endings" />
+      <PhoneAppBar title={t('phone.app.endings')} kicker={t('phone.endings.kicker')} icon="endings" />
       <div className="end-shell">
         {endings.length === 0 ? (
-          <Empty icon={<Icon name="trophy" size={36} />} title="No endings yet">
-            <p className="muted">
-              See a relationship all the way through — move in together and stay deeply in love — to reach a happy ending.
-              It's a celebration, not a finish: you can always keep playing.
-            </p>
+          <Empty icon={<Icon name="trophy" size={36} />} title={t('phone.endings.emptyTitle')}>
+            <p className="muted">{t('phone.endings.emptyBody')}</p>
           </Empty>
         ) : (
           <>
             <div className="end-plate">
-              <div className="kicker">Happy Endings</div>
-              <h2 className="end-plate-title">Treasured Epilogues</h2>
+              <div className="kicker">{t('phone.endings.kicker')}</div>
+              <h2 className="end-plate-title">{t('phone.endings.plateTitle')}</h2>
               <div className="end-plate-rule">✦ ✦ ✦</div>
             </div>
             {endings.map((e) => {
@@ -64,7 +63,7 @@ export function EndingsApp() {
                     <div>
                       <div className="end-title">{e.title}</div>
                       <span className="end-by">
-                        {c?.name ?? 'Someone'} · Day {e.day}
+                        {t('phone.endings.by', { name: c?.name ?? t('common.someone'), day: e.day })}
                       </span>
                     </div>
                   </div>

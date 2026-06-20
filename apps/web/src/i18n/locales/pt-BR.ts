@@ -672,4 +672,58 @@ export const ptBR: Record<MessageKey, string> = {
   'settings.tragicModal.ack':
     'Entendo que este conteúdo trata de suicídio como consequência de abuso dentro do jogo, e quero ativá-lo. Posso desativá-lo a qualquer momento.',
   'settings.tragicModal.confirm': 'Ativar desfechos trágicos',
+
+  // --- Phone shell + app names --------------------------------------------
+  'phone.app.messages': 'Mensagens',
+  'phone.app.mail': 'E-mail',
+  'phone.app.faces': 'Rostos',
+  'phone.app.moments': 'Momentos',
+  'phone.app.calendar': 'Almanaque',
+  'phone.app.social': 'Social',
+  'phone.app.weather': 'Clima',
+  'phone.app.endings': 'Finais',
+  'phone.app.work': 'Trabalho',
+  'phone.app.property': 'Imóveis',
+  'phone.app.market': 'Mercado',
+  'phone.app.gambling': 'Cassino',
+  'phone.app.shop': 'Loja',
+  'phone.app.games': 'Jogos',
+  'phone.app.bag': 'Bolsa',
+  'phone.app.settings': 'Ajustes',
+  'phone.status.almanac': 'O Almanaque',
+  'phone.phaseFallback': 'Crepúsculo',
+  'phone.greetingEyebrow': '{phase} · o almanaque do coração',
+  'phone.hint': 'Mensagens e e-mails chegam conforme os dias passam.',
+  'phone.batteryAria': 'Bateria {pct}%',
+
+  // --- Phone · Endings -----------------------------------------------------
+  'phone.endings.kicker': 'Finais Felizes',
+  'phone.endings.emptyTitle': 'Nenhum final ainda',
+  'phone.endings.emptyBody':
+    'Leve um relacionamento até o fim — morem juntos e permaneçam profundamente apaixonados — para chegar a um final feliz. É uma celebração, não um encerramento: você sempre pode continuar jogando.',
+  'phone.endings.plateTitle': 'Epílogos Queridos',
+  'phone.endings.by': '{name} · Dia {day}',
+
+  // --- Phone · Weather -----------------------------------------------------
+  'phone.weather.today': 'Hoje',
+  'phone.weather.noWorldTitle': 'Nenhum mundo ativo',
+  'phone.weather.noWorldBody': 'Escolha ou crie um mundo para ver o clima dele.',
+  'phone.weather.todayOver': 'Hoje sobre o mundo',
+  'phone.weather.itsLabel': 'Está {label}',
+  'phone.weather.weekAhead': 'A semana que vem',
+  'phone.weather.howFeeling': 'Como todo mundo está se sentindo',
+  'phone.weather.noOne': 'Ninguém mora neste mundo ainda.',
+  'phone.weather.lovesIt': 'adora ☀️',
+  'phone.weather.lovesTitle': 'adora o clima de hoje',
+  'phone.weather.notFan': 'não curte ☔',
+  'phone.weather.dislikesTitle': 'não gosta do clima de hoje',
+  'phone.weather.tasteHint': 'Defina o clima favorito / detestado dos personagens no editor para ver reações mais fortes.',
+
+  // --- Phone · Mail --------------------------------------------------------
+  'phone.mail.inbox': 'Caixa de entrada',
+  'phone.mail.reading': 'Lendo',
+  'phone.mail.backInbox': 'Voltar para a caixa de entrada',
+  'phone.mail.emptyTitle': 'Sem e-mails ainda',
+  'phone.mail.emptyBody': 'Cartas e avisos do mundo chegam conforme os dias passam.',
+  'common.refresh': 'Atualizar',
 };

@@ -4,6 +4,7 @@ import type { Email } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
+import { useT, type TFunc } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Banner, Spinner } from '../ui';
@@ -13,14 +14,15 @@ function senderInitial(name: string): string {
 }
 
 /** Show "Day N" when available; fall back to a short date from the timestamp. */
-function emailWhen(e: Email): string | null {
-  if (e.dayNumber != null) return `Day ${e.dayNumber}`;
+function emailWhen(e: Email, t: TFunc): string | null {
+  if (e.dayNumber != null) return t('dash.hud.day', { day: e.dayNumber });
   const ts = e.deliveredAt ?? e.createdAt;
   if (!ts) return null;
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 export function EmailApp() {
+  const t = useT();
   const { activeWorldId, dayTick } = useAppData();
   const [emails, setEmails] = useState<Email[]>([]);
   const [open, setOpen] = useState<Email | null>(null);
@@ -56,15 +58,15 @@ export function EmailApp() {
   };
 
   if (open) {
-    const when = emailWhen(open);
+    const when = emailWhen(open, t);
     return (
       <div className="phone-app">
         <PhoneAppBar
           title={open.senderName}
-          kicker="Reading"
+          kicker={t('phone.mail.reading')}
           icon="mail"
           left={
-            <button className="btn sm ghost pbar-iconbtn" onClick={() => setOpen(null)} aria-label="Back to inbox" title="Inbox">
+            <button className="btn sm ghost pbar-iconbtn" onClick={() => setOpen(null)} aria-label={t('phone.mail.backInbox')} title={t('phone.mail.inbox')}>
               <Icon name="chevronDown" size={18} />
             </button>
           }
@@ -88,11 +90,11 @@ export function EmailApp() {
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title="Inbox"
-        kicker="Mail"
+        title={t('phone.mail.inbox')}
+        kicker={t('phone.app.mail')}
         icon="mail"
         right={
-          <button className="btn sm ghost pbar-iconbtn" onClick={load} aria-label="Refresh" title="Refresh">
+          <button className="btn sm ghost pbar-iconbtn" onClick={load} aria-label={t('common.refresh')} title={t('common.refresh')}>
             <Icon name="refresh" size={18} />
           </button>
         }
@@ -103,13 +105,13 @@ export function EmailApp() {
       ) : emails.length === 0 ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="mail" size={32} /></span>
-          <span className="pcom-empty-title">No mail yet</span>
-          <p>In-world letters and notices arrive as the days pass.</p>
+          <span className="pcom-empty-title">{t('phone.mail.emptyTitle')}</span>
+          <p>{t('phone.mail.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-rows">
           {emails.map((e) => {
-            const when = emailWhen(e);
+            const when = emailWhen(e, t);
             return (
               <button
                 key={e.id}
