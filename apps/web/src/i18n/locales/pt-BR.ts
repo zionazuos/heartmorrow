@@ -62,10 +62,139 @@ export const ptBR: Record<MessageKey, string> = {
   'dash.tile.settings.title': 'Ajustes',
   'dash.tile.settings.desc': 'Sua persona e preferências.',
 
+  // --- Shared / reused labels ---------------------------------------------
+  'common.cancel': 'Cancelar',
+  'common.saving': 'Salvando…',
+  'common.off': 'Desligado',
+  'common.enabling': 'Ativando…',
+
   // --- Settings → Language -------------------------------------------------
   'settings.language.kicker': 'Exibição',
   'settings.language.title': 'Idioma',
   'settings.language.lede':
     'Escolha o idioma da interface. Observação: os personagens falam o idioma com que a sua LLM é instruída — este ajuste traduz apenas os textos do próprio app.',
   'settings.language.label': 'Idioma da interface',
+
+  // --- Settings → page head ------------------------------------------------
+  'settings.head.kicker': 'A mesa de controle',
+  'settings.head.title': 'Ajustes',
+  'settings.head.lede':
+    'Configure o seu endpoint local compatível com OpenAI (LM Studio, Ollama, llama.cpp, …). O navegador nunca chama o modelo diretamente — quem faz isso é o servidor local.',
+  'settings.saved': 'Ajustes salvos.',
+
+  // --- Settings → Mode -----------------------------------------------------
+  'settings.mode.kicker': 'Como você joga',
+  'settings.mode.title': 'Modo',
+  'settings.mode.playStrong': 'Modo Jogo',
+  'settings.mode.creatorStrong': 'Modo Criador',
+  'settings.mode.ledeSuffix': ' Também disponível em Celular → Ajustes.',
+  'settings.mode.playDesc': ' esconde as ferramentas de criação/edição (sem excluir personagens no meio do jogo). ',
+  'settings.mode.creatorDesc': ' as mostra.',
+  'settings.mode.playBtn': 'Modo Jogo',
+  'settings.mode.creatorBtn': 'Modo Criador',
+
+  // --- Settings → Adult content (NSFW) ------------------------------------
+  'settings.nsfw.kicker': 'Maturidade',
+  'settings.nsfw.title': 'Conteúdo adulto (NSFW)',
+  'settings.nsfw.lede':
+    'Quando ativado, o modelo pode gerar conteúdo maduro/explícito durante os encontros — mas apenas quando o seu relacionamento com o personagem estiver avançado o suficiente. Se propor algo a um estranho ou conhecido, ele ainda vai embora.',
+  'settings.nsfw.on': 'Conteúdo adulto LIGADO',
+  'settings.nsfw.disable': 'Desativar',
+  'settings.nsfw.enable': 'Ativar conteúdo adulto…',
+  'settings.nsfw.hint':
+    'Funciona melhor com um modelo abliterated / “sem censura”. Um modelo censurado ou ajustado para segurança ainda pode recusar conteúdo explícito mesmo com esta opção ligada.',
+
+  // --- Settings → Tragic outcomes -----------------------------------------
+  'settings.tragic.kicker': 'Temas pesados',
+  'settings.tragic.title': 'Desfechos trágicos (automutilação)',
+  'settings.tragic.lede':
+    'Quando ativado, o maltrato severo e prolongado de alguém que amava você (sofrimentos repetidos, traições, crueldade) pode evoluir — com muitos avisos claros e chances de parar — até um personagem tirar a própria vida, sendo memorializado permanentemente. O ato nunca é retratado. Deixá-lo em paz ou tratá-lo com gentileza sempre o traz de volta. Desligado por padrão.',
+  'settings.tragic.on': 'Desfechos trágicos LIGADOS',
+  'settings.tragic.disable': 'Desativar',
+  'settings.tragic.enable': 'Ativar desfechos trágicos…',
+
+  // --- Settings → Your persona --------------------------------------------
+  'settings.persona.kicker': 'Quem é você',
+  'settings.persona.title': 'Sua persona',
+  'settings.persona.lede':
+    'Como os personagens te veem — seu nome, pronomes e notas são compartilhados com todos que você conhece.',
+  'settings.persona.name': 'Seu nome',
+  'settings.persona.pronouns': 'Seus pronomes',
+  'settings.persona.gender': 'Seu gênero',
+  'settings.persona.genderHint': 'Separado dos pronomes.',
+  'settings.persona.sexuality': 'Sua sexualidade',
+  'settings.persona.sexualityHint': 'Define com quais personagens um romance pode se aprofundar.',
+  'settings.persona.notes': 'Notas da persona',
+  'settings.persona.notesHint': 'Opcional — qualquer coisa que você queira que os personagens saibam sobre você.',
+  'settings.persona.save': 'Salvar persona',
+  'settings.persona.saved': 'Salvo ✓',
+
+  // --- Settings → Connection console --------------------------------------
+  'settings.console.sub': 'Link com o modelo local',
+  'settings.console.title': 'Console de conexão',
+  'settings.console.endpointSet': 'Endpoint definido',
+  'settings.console.noEndpoint': 'Sem endpoint',
+  'settings.console.connection': 'Conexão',
+  'settings.console.baseUrl': 'URL base',
+  'settings.console.baseUrlHint': 'ex.: http://localhost:1234/v1',
+  'settings.console.apiKey': 'Chave de API',
+  'settings.console.apiKeySetHint': 'Uma chave está definida. Deixe em branco para mantê-la.',
+  'settings.console.apiKeyHint': 'Opcional para servidores locais.',
+  'settings.console.apiKeySetPlaceholder': '•••••••• (inalterada)',
+  'settings.console.apiKeyPlaceholder': 'opcional',
+  'settings.console.model': 'Modelo',
+  'settings.console.visionModel': 'Modelo de visão',
+  'settings.console.visionModelHint':
+    'Opcional — usado para geração baseada em imagem (ex.: rascunhar um personagem a partir de um retrato). Deixe em branco para reutilizar o modelo acima.',
+  'settings.console.visionModelPlaceholder': '(igual ao modelo)',
+  'settings.console.loadModels': 'Carregar modelos de /v1/models',
+  'settings.console.loadingModels': 'Carregando…',
+  'settings.console.generation': 'Geração',
+  'settings.console.temperature': 'Temperatura: {value}',
+  'settings.console.maxTokens': 'Máx. de tokens',
+  'settings.console.structuredMode': 'Modo de saída estruturada',
+  'settings.console.structuredModeHint': 'json_object funciona com a maioria dos servidores locais.',
+  'settings.console.omitSchema': 'Remover o schema do prompt',
+  'settings.console.omitSchemaHint':
+    'Teste de desempenho apenas para o modo json_schema: a gramática já impõe o formato, então o texto duplicado do schema no prompt é redundante. Removê-lo encurta o prompt (prefill mais rápido). Sem efeito em json_object / prompt_only.',
+  'settings.console.omitSchemaLabel': 'Pular o texto duplicado do schema (modo json_schema)',
+  'settings.console.endpointMode': 'Modo de endpoint',
+  'settings.console.endpointModeHint': 'responses está reservado para uso futuro.',
+  'settings.console.retryLimit': 'Limite de tentativas estruturadas',
+  'settings.console.retryLimitHint': 'Tentativas após uma resposta estruturada malformada/inválida.',
+  'settings.console.cadence': 'Feedback ao vivo do encontro',
+  'settings.console.cadenceHint':
+    "Com que frequência um encontro avalia como a sua última mensagem caiu (atualiza o clima + a expressão dele). 'Toda mensagem' é o mais responsivo; 'periodicamente' mantém as respostas mais ágeis com uma chamada a menos ao modelo por turno.",
+  'settings.console.cadenceEvery': 'Toda mensagem',
+  'settings.console.cadencePeriodic': 'Periodicamente (mais leve)',
+  'settings.console.save': 'Salvar ajustes',
+  'settings.console.test': 'Testar conexão',
+  'settings.console.testing': 'Testando…',
+
+  // --- Settings → Health banner -------------------------------------------
+  'settings.health.connected': 'Conectado!',
+  'settings.health.failed': 'Falhou.',
+  'settings.health.sample': 'Resposta de exemplo: ',
+  'settings.health.models': 'Modelos: ',
+
+  // --- Settings → NSFW confirmation modal ---------------------------------
+  'settings.nsfwModal.kicker': 'Confirme, por favor',
+  'settings.nsfwModal.title': 'Ativar conteúdo adulto (NSFW)',
+  'settings.nsfwModal.intro':
+    'Este é um jogo privado, local e de usuário único. O conteúdo é gerado pelo seu próprio modelo local e nunca sai da sua máquina. Para continuar, confirme as duas afirmações abaixo:',
+  'settings.nsfwModal.ackContent':
+    'Entendo que, com o conteúdo adulto ativado, o modelo local pode gerar material explícito, sexual ou de outra forma inapropriado, e que o DSim não filtra nem garante a sua saída.',
+  'settings.nsfwModal.ackAge': 'Afirmo que tenho idade legal para visualizar conteúdo adulto na minha jurisdição.',
+  'settings.nsfwModal.hint':
+    'Funciona melhor com um modelo abliterated / “sem censura” — um modelo censurado ainda pode recusar mesmo com isto ligado. O conteúdo adulto só é gerado quando o seu relacionamento com o personagem está avançado o suficiente; propor algo a um estranho ou conhecido ainda fará com que ele vá embora.',
+  'settings.nsfwModal.confirm': 'Ativar conteúdo adulto',
+
+  // --- Settings → Tragic confirmation modal -------------------------------
+  'settings.tragicModal.kicker': 'Leia com atenção',
+  'settings.tragicModal.title': 'Ativar desfechos trágicos',
+  'settings.tragicModal.intro':
+    'Isto adiciona uma consequência pesada e opcional: se você maltratar repetida e severamente um personagem que se apegou profundamente a você — e ignorar os avisos crescentes, incluindo um amigo preocupado entrando em contato — ele pode tirar a própria vida e ser memorializado permanentemente. O ato em si nunca é mostrado. Ser gentil, dar espaço ou simplesmente parar sempre o traz de volta.',
+  'settings.tragicModal.ack':
+    'Entendo que este conteúdo trata de suicídio como consequência de abuso dentro do jogo, e quero ativá-lo. Posso desativá-lo a qualquer momento.',
+  'settings.tragicModal.confirm': 'Ativar desfechos trágicos',
 };

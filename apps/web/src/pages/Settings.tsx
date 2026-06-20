@@ -137,7 +137,7 @@ export function Settings() {
       const s = await api.updateSettings(buildUpdate());
       setApiKeySet(s.apiKeySet);
       setForm((f) => (f ? { ...f, apiKey: '' } : f));
-      setSavedNote('Settings saved.');
+      setSavedNote(t('settings.saved'));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -244,12 +244,9 @@ export function Settings() {
   return (
     <div className="stack set-page">
       <div className="page-head">
-        <div className="kicker">The control desk</div>
-        <h1>Settings</h1>
-        <p>
-          Configure your local OpenAI-compatible endpoint (LM Studio, Ollama, llama.cpp, …). The browser never calls
-          the model directly — the local server does.
-        </p>
+        <div className="kicker">{t('settings.head.kicker')}</div>
+        <h1>{t('settings.head.title')}</h1>
+        <p>{t('settings.head.lede')}</p>
       </div>
       {error && <Banner kind="error">{error}</Banner>}
       {savedNote && <Banner kind="ok">{savedNote}</Banner>}
@@ -277,21 +274,22 @@ export function Settings() {
       <div className="card set-section">
         <div className="section-head">
           <div className="titles">
-            <div className="kicker">How you play</div>
-            <h2>Mode</h2>
+            <div className="kicker">{t('settings.mode.kicker')}</div>
+            <h2>{t('settings.mode.title')}</h2>
           </div>
           <div className="trail" />
         </div>
         <p className="set-lede">
-          <strong>Play mode</strong> hides creation/editing tools (no deleting characters mid-game).{' '}
-          <strong>Creator mode</strong> shows them. Also in Phone → Settings.
+          <strong>{t('settings.mode.playStrong')}</strong>{t('settings.mode.playDesc')}
+          <strong>{t('settings.mode.creatorStrong')}</strong>{t('settings.mode.creatorDesc')}
+          {t('settings.mode.ledeSuffix')}
         </p>
         <div className="set-choice">
           <button className={`btn sm ${!creatorMode ? 'primary' : ''}`} onClick={() => setCreatorMode(false)}>
-            <Icon name="play" size={14} /> Play mode
+            <Icon name="play" size={14} /> {t('settings.mode.playBtn')}
           </button>
           <button className={`btn sm ${creatorMode ? 'primary' : ''}`} onClick={() => setCreatorMode(true)}>
-            <Icon name="edit" size={14} /> Creator mode
+            <Icon name="edit" size={14} /> {t('settings.mode.creatorBtn')}
           </button>
         </div>
       </div>
@@ -299,60 +297,49 @@ export function Settings() {
       <div className="card set-section">
         <div className="section-head">
           <div className="titles">
-            <div className="kicker">Maturity</div>
-            <h2>Adult content (NSFW)</h2>
+            <div className="kicker">{t('settings.nsfw.kicker')}</div>
+            <h2>{t('settings.nsfw.title')}</h2>
           </div>
           <div className="trail" />
         </div>
-        <p className="set-lede">
-          When enabled, the model may generate mature/explicit content during dates — but only once your relationship
-          with a character is advanced enough. Propositioning a stranger or acquaintance will still make them walk out.
-        </p>
+        <p className="set-lede">{t('settings.nsfw.lede')}</p>
         <div className="set-status-line">
           {form.nsfwEnabled ? (
             <>
-              <span className="badge warn">Adult content ON</span>
+              <span className="badge warn">{t('settings.nsfw.on')}</span>
               <button className="btn sm" onClick={() => persistNsfw(false)} disabled={nsfwSaving}>
-                {nsfwSaving ? 'Saving…' : 'Disable'}
+                {nsfwSaving ? t('common.saving') : t('settings.nsfw.disable')}
               </button>
             </>
           ) : (
             <>
-              <span className="badge">Off</span>
+              <span className="badge">{t('common.off')}</span>
               <button className="btn sm danger" onClick={() => setNsfwModalOpen(true)} disabled={nsfwSaving}>
-                Enable adult content…
+                {t('settings.nsfw.enable')}
               </button>
             </>
           )}
         </div>
-        <p className="hint" style={{ marginBottom: 0, marginTop: 12 }}>
-          Best paired with an abliterated / “uncensored” model. A censored or safety-tuned model may still refuse
-          explicit content even with this toggle on.
-        </p>
+        <p className="hint" style={{ marginBottom: 0, marginTop: 12 }}>{t('settings.nsfw.hint')}</p>
 
         {form.nsfwEnabled && (
           <div className="set-subtoggle">
-            <div className="kicker">Heavy themes</div>
-            <h3 style={{ margin: '4px 0 6px' }}>Tragic outcomes (self-harm)</h3>
-            <p className="set-lede" style={{ marginTop: 0 }}>
-              When enabled, sustained, severe mistreatment of someone who loved you (repeated heartbreak, cheating,
-              cruelty) can spiral — with many clear warnings and chances to stop — into a character taking their own
-              life, permanently memorializing them. The act is never depicted. Leaving them be or treating them kindly
-              always pulls them back. Off by default.
-            </p>
+            <div className="kicker">{t('settings.tragic.kicker')}</div>
+            <h3 style={{ margin: '4px 0 6px' }}>{t('settings.tragic.title')}</h3>
+            <p className="set-lede" style={{ marginTop: 0 }}>{t('settings.tragic.lede')}</p>
             <div className="set-status-line">
               {form.tragicOutcomesEnabled ? (
                 <>
-                  <span className="badge danger">Tragic outcomes ON</span>
+                  <span className="badge danger">{t('settings.tragic.on')}</span>
                   <button className="btn sm" onClick={() => persistTragic(false)} disabled={tragicSaving}>
-                    {tragicSaving ? 'Saving…' : 'Disable'}
+                    {tragicSaving ? t('common.saving') : t('settings.tragic.disable')}
                   </button>
                 </>
               ) : (
                 <>
-                  <span className="badge">Off</span>
+                  <span className="badge">{t('common.off')}</span>
                   <button className="btn sm danger" onClick={() => setTragicModalOpen(true)} disabled={tragicSaving}>
-                    Enable tragic outcomes…
+                    {t('settings.tragic.enable')}
                   </button>
                 </>
               )}
@@ -365,24 +352,22 @@ export function Settings() {
         <div className="card set-section">
           <div className="section-head">
             <div className="titles">
-              <div className="kicker">Who you are</div>
-              <h2>Your persona</h2>
+              <div className="kicker">{t('settings.persona.kicker')}</div>
+              <h2>{t('settings.persona.title')}</h2>
             </div>
             <div className="trail" />
           </div>
-          <p className="set-lede">
-            How characters see you — your name, pronouns, and notes are shared with everyone you meet.
-          </p>
+          <p className="set-lede">{t('settings.persona.lede')}</p>
           <div className="inline-fields">
-            <Field label="Your name">
+            <Field label={t('settings.persona.name')}>
               <input value={player.name} onChange={(e) => setPlayer({ ...player, name: e.target.value })} />
             </Field>
-            <Field label="Your pronouns">
+            <Field label={t('settings.persona.pronouns')}>
               <input value={player.pronouns} onChange={(e) => setPlayer({ ...player, pronouns: e.target.value })} />
             </Field>
           </div>
           <div className="inline-fields">
-            <Field label="Your gender" hint="Separate from pronouns.">
+            <Field label={t('settings.persona.gender')} hint={t('settings.persona.genderHint')}>
               <select value={player.gender} onChange={(e) => setPlayer({ ...player, gender: e.target.value as Gender })}>
                 {Object.entries(GENDER_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
@@ -391,7 +376,7 @@ export function Settings() {
                 ))}
               </select>
             </Field>
-            <Field label="Your sexuality" hint="Decides which characters a romance can deepen with.">
+            <Field label={t('settings.persona.sexuality')} hint={t('settings.persona.sexualityHint')}>
               <select
                 value={player.sexuality}
                 onChange={(e) => setPlayer({ ...player, sexuality: e.target.value as Sexuality })}
@@ -404,7 +389,7 @@ export function Settings() {
               </select>
             </Field>
           </div>
-          <Field label="Persona notes" hint="Optional — anything you want characters to know about you.">
+          <Field label={t('settings.persona.notes')} hint={t('settings.persona.notesHint')}>
             <textarea
               value={player.personaNotes}
               onChange={(e) => setPlayer({ ...player, personaNotes: e.target.value })}
@@ -412,9 +397,9 @@ export function Settings() {
           </Field>
           <div className="row">
             <button className="btn primary" onClick={savePlayer} disabled={playerSaving}>
-              {playerSaving ? 'Saving…' : 'Save persona'}
+              {playerSaving ? t('common.saving') : t('settings.persona.save')}
             </button>
-            {playerSaved && <span className="badge good">Saved ✓</span>}
+            {playerSaved && <span className="badge good">{t('settings.persona.saved')}</span>}
           </div>
         </div>
       )}
@@ -424,27 +409,32 @@ export function Settings() {
       <div className="framed set-console">
         <div className="set-console-head">
           <div>
-            <div className="set-console-sub">Local model link</div>
-            <div className="set-console-title">Connection console</div>
+            <div className="set-console-sub">{t('settings.console.sub')}</div>
+            <div className="set-console-title">{t('settings.console.title')}</div>
           </div>
-          <span className="set-console-dot">{form.baseUrl ? 'Endpoint set' : 'No endpoint'}</span>
+          <span className="set-console-dot">
+            {form.baseUrl ? t('settings.console.endpointSet') : t('settings.console.noEndpoint')}
+          </span>
         </div>
 
         <div className="set-console-grid">
           <div className="set-console-col">
-            <div className="set-col-label">Connection</div>
-            <Field label="Base URL" hint="e.g. http://localhost:1234/v1">
+            <div className="set-col-label">{t('settings.console.connection')}</div>
+            <Field label={t('settings.console.baseUrl')} hint={t('settings.console.baseUrlHint')}>
               <input value={form.baseUrl} onChange={(e) => set('baseUrl', e.target.value)} />
             </Field>
-            <Field label="API key" hint={apiKeySet ? 'A key is set. Leave blank to keep it.' : 'Optional for local servers.'}>
+            <Field
+              label={t('settings.console.apiKey')}
+              hint={apiKeySet ? t('settings.console.apiKeySetHint') : t('settings.console.apiKeyHint')}
+            >
               <input
                 type="password"
-                placeholder={apiKeySet ? '•••••••• (unchanged)' : 'optional'}
+                placeholder={apiKeySet ? t('settings.console.apiKeySetPlaceholder') : t('settings.console.apiKeyPlaceholder')}
                 value={form.apiKey}
                 onChange={(e) => set('apiKey', e.target.value)}
               />
             </Field>
-            <Field label="Model">
+            <Field label={t('settings.console.model')}>
               <input value={form.model} onChange={(e) => set('model', e.target.value)} list="model-list" />
               <datalist id="model-list">
                 {models.map((m) => (
@@ -452,25 +442,22 @@ export function Settings() {
                 ))}
               </datalist>
             </Field>
-            <Field
-              label="Vision model"
-              hint="Optional — used for image-based generation (e.g. drafting a character from a portrait). Leave blank to reuse the model above."
-            >
+            <Field label={t('settings.console.visionModel')} hint={t('settings.console.visionModelHint')}>
               <input
                 value={form.visionModel}
                 onChange={(e) => set('visionModel', e.target.value)}
                 list="model-list"
-                placeholder="(same as model)"
+                placeholder={t('settings.console.visionModelPlaceholder')}
               />
             </Field>
             <button className="btn sm" onClick={loadModels} disabled={loadingModels}>
-              {loadingModels ? 'Loading…' : 'Load models from /v1/models'}
+              {loadingModels ? t('settings.console.loadingModels') : t('settings.console.loadModels')}
             </button>
           </div>
 
           <div className="set-console-col">
-            <div className="set-col-label">Generation</div>
-            <Field label={`Temperature: ${form.temperature}`}>
+            <div className="set-col-label">{t('settings.console.generation')}</div>
+            <Field label={t('settings.console.temperature', { value: form.temperature })}>
               <input
                 type="range"
                 min={0}
@@ -480,45 +467,39 @@ export function Settings() {
                 onChange={(e) => set('temperature', Number(e.target.value))}
               />
             </Field>
-            <Field label="Max tokens">
+            <Field label={t('settings.console.maxTokens')}>
               <input type="number" value={form.maxTokens} onChange={(e) => set('maxTokens', Number(e.target.value))} />
             </Field>
-            <Field label="Structured output mode" hint="json_object works with most local servers.">
+            <Field label={t('settings.console.structuredMode')} hint={t('settings.console.structuredModeHint')}>
               <select value={form.structuredMode} onChange={(e) => set('structuredMode', e.target.value as StructuredOutputMode)}>
                 <option value="json_schema">json_schema</option>
                 <option value="json_object">json_object</option>
                 <option value="prompt_only">prompt_only</option>
               </select>
             </Field>
-            <Field
-              label="Drop schema from prompt"
-              hint="Perf test for json_schema mode only: the grammar already enforces the shape, so the duplicated schema text in the prompt is redundant. Skipping it shrinks the prompt (faster prefill). No effect in json_object / prompt_only."
-            >
+            <Field label={t('settings.console.omitSchema')} hint={t('settings.console.omitSchemaHint')}>
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={form.omitSchemaInPrompt}
                   onChange={(e) => set('omitSchemaInPrompt', e.target.checked)}
                 />
-                <span>Skip the duplicate schema text (json_schema mode)</span>
+                <span>{t('settings.console.omitSchemaLabel')}</span>
               </label>
             </Field>
-            <Field label="Endpoint mode" hint="responses is reserved for future use.">
+            <Field label={t('settings.console.endpointMode')} hint={t('settings.console.endpointModeHint')}>
               <select value={form.endpointMode} onChange={(e) => set('endpointMode', e.target.value as EndpointMode)}>
                 <option value="chat_completions">chat_completions</option>
                 <option value="responses">responses</option>
               </select>
             </Field>
-            <Field label="Structured retry limit" hint="Retries after a malformed/invalid structured response.">
+            <Field label={t('settings.console.retryLimit')} hint={t('settings.console.retryLimitHint')}>
               <input type="number" min={0} max={10} value={form.maxRetries} onChange={(e) => set('maxRetries', Number(e.target.value))} />
             </Field>
-            <Field
-              label="Live date feedback"
-              hint="How often a date reads how your last message landed (updates the vibe + their expression). 'Every message' is most responsive; 'periodic' keeps replies snappier with one fewer model call per turn."
-            >
+            <Field label={t('settings.console.cadence')} hint={t('settings.console.cadenceHint')}>
               <select value={form.rapportCadence} onChange={(e) => set('rapportCadence', e.target.value as 'every' | 'periodic')}>
-                <option value="every">Every message</option>
-                <option value="periodic">Periodically (lighter)</option>
+                <option value="every">{t('settings.console.cadenceEvery')}</option>
+                <option value="periodic">{t('settings.console.cadencePeriodic')}</option>
               </select>
             </Field>
           </div>
@@ -526,28 +507,28 @@ export function Settings() {
 
         <div className="set-console-foot">
           <button className="btn primary" onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save settings'}
+            {saving ? t('common.saving') : t('settings.console.save')}
           </button>
           <button className="btn" onClick={test} disabled={testing}>
-            {testing ? 'Testing…' : <><Icon name="refresh" size={15} /> Test connection</>}
+            {testing ? t('settings.console.testing') : <><Icon name="refresh" size={15} /> {t('settings.console.test')}</>}
           </button>
         </div>
       </div>
 
       {health && (
         <Banner kind={health.ok ? 'ok' : 'error'}>
-          <strong>{health.ok ? 'Connected!' : 'Failed.'}</strong> {health.message}
+          <strong>{health.ok ? t('settings.health.connected') : t('settings.health.failed')}</strong> {health.message}
           {health.latencyMs !== undefined && <> · {health.latencyMs}ms</>}
           {health.sample && (
             <>
               <br />
-              Sample reply: <em>{health.sample}</em>
+              {t('settings.health.sample')}<em>{health.sample}</em>
             </>
           )}
           {health.models && health.models.length > 0 && (
             <>
               <br />
-              Models: {health.models.slice(0, 8).join(', ')}
+              {t('settings.health.models')}{health.models.slice(0, 8).join(', ')}
             </>
           )}
         </Banner>
@@ -557,12 +538,9 @@ export function Settings() {
         createPortal(
           <div className="modal-overlay" onClick={closeNsfwModal}>
             <div className="modal card" onClick={(e) => e.stopPropagation()}>
-              <div className="kicker">Please confirm</div>
-              <h2 style={{ marginTop: 0 }}>Enable adult (NSFW) content</h2>
-              <p className="hint" style={{ marginTop: 0 }}>
-                This is a private, local, single-user game. Content is generated by your own local model and never
-                leaves your machine. To continue, please confirm both of the following:
-              </p>
+              <div className="kicker">{t('settings.nsfwModal.kicker')}</div>
+              <h2 style={{ marginTop: 0 }}>{t('settings.nsfwModal.title')}</h2>
+              <p className="hint" style={{ marginTop: 0 }}>{t('settings.nsfwModal.intro')}</p>
               <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', margin: '12px 0', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
@@ -570,10 +548,7 @@ export function Settings() {
                   onChange={(e) => setAckContent(e.target.checked)}
                   style={{ marginTop: 3 }}
                 />
-                <span>
-                  I understand that with adult content enabled, the local model may generate explicit, sexual, or
-                  otherwise inappropriate material, and that DSim does not filter or guarantee its output.
-                </span>
+                <span>{t('settings.nsfwModal.ackContent')}</span>
               </label>
               <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', margin: '12px 0', cursor: 'pointer' }}>
                 <input
@@ -582,24 +557,20 @@ export function Settings() {
                   onChange={(e) => setAckAge(e.target.checked)}
                   style={{ marginTop: 3 }}
                 />
-                <span>I affirm that I am of legal age to view adult content in my jurisdiction.</span>
+                <span>{t('settings.nsfwModal.ackAge')}</span>
               </label>
-              <p className="hint">
-                Best paired with an abliterated / “uncensored” model — a censored model may still refuse even with this
-                on. Adult content is only ever generated once your relationship with a character is advanced enough;
-                propositioning a stranger or acquaintance will still make them walk out.
-              </p>
+              <p className="hint">{t('settings.nsfwModal.hint')}</p>
               {error && <Banner kind="error">{error}</Banner>}
               <div className="row" style={{ justifyContent: 'flex-end' }}>
                 <button className="btn ghost" onClick={closeNsfwModal} disabled={nsfwSaving}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   className="btn danger"
                   disabled={!(ackContent && ackAge) || nsfwSaving}
                   onClick={confirmEnableNsfw}
                 >
-                  {nsfwSaving ? 'Enabling…' : 'Enable adult content'}
+                  {nsfwSaving ? t('common.enabling') : t('settings.nsfwModal.confirm')}
                 </button>
               </div>
             </div>
@@ -611,29 +582,21 @@ export function Settings() {
         createPortal(
           <div className="modal-overlay" onClick={closeTragicModal}>
             <div className="modal card" onClick={(e) => e.stopPropagation()}>
-              <div className="kicker">Please read carefully</div>
-              <h2 style={{ marginTop: 0 }}>Enable tragic outcomes</h2>
-              <p className="hint" style={{ marginTop: 0 }}>
-                This adds a heavy, optional consequence: if you repeatedly and severely mistreat a character who became
-                deeply attached to you — and ignore the escalating warnings, including a worried friend reaching out —
-                they may take their own life and be permanently memorialized. The act itself is never shown. Being kind,
-                giving them space, or simply stopping always pulls them back from it.
-              </p>
+              <div className="kicker">{t('settings.tragicModal.kicker')}</div>
+              <h2 style={{ marginTop: 0 }}>{t('settings.tragicModal.title')}</h2>
+              <p className="hint" style={{ marginTop: 0 }}>{t('settings.tragicModal.intro')}</p>
               <CrisisResources />
               <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', margin: '12px 0', cursor: 'pointer' }}>
                 <input type="checkbox" checked={ackTragic} onChange={(e) => setAckTragic(e.target.checked)} style={{ marginTop: 3 }} />
-                <span>
-                  I understand this content deals with suicide as a consequence of in-game abuse, and I want it enabled.
-                  I can turn it off at any time.
-                </span>
+                <span>{t('settings.tragicModal.ack')}</span>
               </label>
               {error && <Banner kind="error">{error}</Banner>}
               <div className="row" style={{ justifyContent: 'flex-end' }}>
                 <button className="btn ghost" onClick={closeTragicModal} disabled={tragicSaving}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button className="btn danger" disabled={!ackTragic || tragicSaving} onClick={confirmEnableTragic}>
-                  {tragicSaving ? 'Enabling…' : 'Enable tragic outcomes'}
+                  {tragicSaving ? t('common.enabling') : t('settings.tragicModal.confirm')}
                 </button>
               </div>
             </div>
