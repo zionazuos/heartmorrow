@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import './phone-comms.css';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
@@ -15,7 +16,6 @@ import { api, assetUrl } from '../../lib/api';
 import { downscaleImageFile } from '../../lib/image';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
-import { useT } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Portrait } from '../Portrait';
@@ -50,7 +50,7 @@ export function MessagesApp() {
 // ——— Landlord Notice view ————————————————————————————————————————————————
 
 function LandlordView({ onBack }: { onBack: () => void }) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const { activeWorldId, refreshInbox } = useAppData();
   const [notices, setNotices] = useState<LandlordNotice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,11 +78,11 @@ function LandlordView({ onBack }: { onBack: () => void }) {
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title={t('msg.landlord.title')}
-        kicker={t('msg.landlord.kicker')}
+        title={t('messages.landlord.title')}
+        kicker={t('messages.landlord.notices')}
         icon="property"
         left={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}>
+          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common:back')} title={t('common:back')}>
             <Icon name="chevronDown" size={18} />
           </button>
         }
@@ -93,8 +93,8 @@ function LandlordView({ onBack }: { onBack: () => void }) {
       ) : notices.length === 0 ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="property" size={32} /></span>
-          <span className="pcom-empty-title">{t('msg.landlord.emptyTitle')}</span>
-          <p>{t('msg.landlord.emptyBody')}</p>
+          <span className="pcom-empty-title">{t('messages.landlord.emptyTitle')}</span>
+          <p>{t('messages.landlord.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-thread lnd-thread">
@@ -103,9 +103,9 @@ function LandlordView({ onBack }: { onBack: () => void }) {
               <div className="lnd-notice-header">
                 <span className="lnd-notice-kind">
                   <Icon name="warn" size={12} />
-                  {n.kind === 'eviction' ? t('msg.landlord.eviction') : t('msg.landlord.overdue')}
+                  {n.kind === 'eviction' ? t('messages.landlord.eviction') : t('messages.landlord.overdue')}
                 </span>
-                <span className="lnd-notice-day">{t('dash.hud.day', { day: n.dayNumber })}</span>
+                <span className="lnd-notice-day">{t('messages.day', { day: n.dayNumber })}</span>
               </div>
               <div className="pcom-bubble lnd-bubble">{n.body}</div>
             </div>
@@ -127,7 +127,7 @@ function ThreadList({
   onNew: () => void;
   onLandlord: () => void;
 }) {
-  const t = useT();
+  const { t, i18n } = useTranslation(['phone', 'common']);
   const { activeWorldId, activeWorld, dayTick } = useAppData();
   const [loading, setLoading] = useState(true);
   const [threads, setThreads] = useState<Awaited<ReturnType<typeof api.phoneThreads>>>([]);
@@ -177,11 +177,11 @@ function ThreadList({
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title={t('phone.app.messages')}
-        kicker={t('msg.inboxKicker')}
+        title={t('messages.title')}
+        kicker={t('messages.inbox')}
         icon="messages"
         right={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onNew} aria-label={t('msg.new')} title={t('msg.new')}>
+          <button className="btn sm ghost pbar-iconbtn" onClick={onNew} aria-label={t('messages.newMessage')} title={t('messages.newMessage')}>
             <Icon name="edit" size={18} />
           </button>
         }
@@ -192,8 +192,8 @@ function ThreadList({
       ) : threads.length === 0 && !hasLandlordNotices ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="messages" size={32} /></span>
-          <span className="pcom-empty-title">{t('msg.emptyTitle')}</span>
-          <p>{t('msg.emptyBody')}</p>
+          <span className="pcom-empty-title">{t('messages.list.emptyTitle')}</span>
+          <p>{t('messages.list.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-rows">
@@ -213,7 +213,7 @@ function ThreadList({
                 <span className="pcom-toprow">
                   <span className="pcom-name lnd-name">
                     <Icon name="warn" size={12} />
-                    {' '}{t('msg.landlord.title')}
+                    {' '}{t('messages.landlord.title')}
                   </span>
                 </span>
                 {landlordPreview && (
@@ -235,16 +235,23 @@ function ThreadList({
                   className="round"
                 />
                 {th.unread > 0 && <span className="pcom-count">{th.unread}</span>}
-                {!th.available && <span className="pcom-dnd" title={t('msg.unavailableToday')}><Icon name="moon" size={11} /></span>}
+                {!th.available && <span className="pcom-dnd" title={t('messages.unavailableToday')}><Icon name="moon" size={11} /></span>}
               </span>
               <span className="pcom-body">
                 <span className="pcom-toprow">
                   <span className="pcom-name">{th.characterName}</span>
-                  {th.lastAt != null && <span className="pcom-when">{new Date(th.lastAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
+                  {th.lastAt != null && <span className="pcom-when">{new Date(th.lastAt).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })}</span>}
                 </span>
-                <span className="pcom-preview">
-                  {!th.available ? (th.unavailableReason ?? t('msg.isUnavailableToday')) : (th.lastBody ?? t('msg.tapToStart'))}
-                </span>
+                {!th.available ? (
+                  <span className="pcom-preview">{th.unavailableReason ?? t('messages.isUnavailableToday')}</span>
+                ) : th.lastBody ? (
+                  <span className="pcom-preview">
+                    {th.lastFromPlayer && <span className="pcom-preview-you">{t('messages.list.you')}</span>}
+                    {th.lastBody}
+                  </span>
+                ) : (
+                  <span className="pcom-preview pcom-preview-empty">{t('messages.list.tapToStart')}</span>
+                )}
               </span>
             </button>
           ))}
@@ -255,7 +262,7 @@ function ThreadList({
 }
 
 function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: () => void }) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const { activeWorldId, dayTick } = useAppData();
   const [contacts, setContacts] = useState<
     Array<{ id: string; name: string; portraitAssetId: string | null; available: boolean; unavailableReason: string | null }>
@@ -275,10 +282,10 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title={t('msg.new')}
-        kicker={t('msg.to')}
+        title={t('messages.newMessage')}
+        kicker={t('messages.to')}
         left={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}>
+          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common:back')} title={t('common:back')}>
             <Icon name="chevronDown" size={18} />
           </button>
         }
@@ -288,12 +295,12 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
       ) : contacts.length === 0 ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="people" size={32} /></span>
-          <span className="pcom-empty-title">{t('msg.noContactsTitle')}</span>
-          <p>{t('msg.noContactsBody')}</p>
+          <span className="pcom-empty-title">{t('messages.new.emptyTitle')}</span>
+          <p>{t('messages.new.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-rows">
-          <div className="pcom-pick-head">{t('moments.choose')}</div>
+          <div className="pcom-pick-head">{t('messages.new.chooseSomeone')}</div>
           {contacts.map((c) => (
             <button
               key={c.id}
@@ -305,12 +312,12 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
                   character={{ name: c.name, portraitAssetId: c.portraitAssetId, expressionAssets: {} }}
                   className="round"
                 />
-                {!c.available && <span className="pcom-dnd" title={t('msg.unavailableToday')}><Icon name="moon" size={11} /></span>}
+                {!c.available && <span className="pcom-dnd" title={t('messages.unavailableToday')}><Icon name="moon" size={11} /></span>}
               </span>
               <span className="pcom-body">
                 <span className="pcom-name">{c.name}</span>
                 {!c.available && (
-                  <span className="pcom-busy">{c.unavailableReason ?? t('msg.isUnavailableToday')}</span>
+                  <span className="pcom-busy">{c.unavailableReason ?? t('messages.isUnavailableToday')}</span>
                 )}
               </span>
             </button>
@@ -322,7 +329,7 @@ function NewMessage({ onPick, onBack }: { onPick: (id: string) => void; onBack: 
 }
 
 function ThreadView({ characterId, onBack }: { characterId: string; onBack: () => void }) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const { reloadPlayer, refreshInbox, assets, reloadAssets, dayTick } = useAppData();
   const [character, setCharacter] = useState<Character | null>(null);
   const [availability, setAvailability] = useState<{ available: boolean; reason: string | null }>({
@@ -333,7 +340,23 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
-  const [feeling, setFeeling] = useState<string | null>(null);
+  // A send that didn't land, with how to recover it. 'reply' = your text saved but
+  // the reply failed → regenerate it (no duplicate text). 'send' = nothing saved
+  // (network/blocked) → resend the original payload, which we keep here.
+  const [failed, setFailed] = useState<
+    | { kind: 'reply' }
+    | {
+        kind: 'send';
+        text: string;
+        image: { assetId: string; url: string } | null;
+        gift: { inventoryItem: InventoryItem; item: ShopItem } | null;
+        // Player-message count in the thread BEFORE this send — lets a retry tell
+        // "my text was saved" (count grew) from "a stale prior reply is trailing".
+        priorPlayerCount: number;
+      }
+    | null
+  >(null);
+  const [feeling, setFeeling] = useState<{ text: string; warm: boolean } | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   // A downscaled photo staged to send with the next text (uploaded already so the
   // asset exists; the vision model reads it server-side).
@@ -354,13 +377,24 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       setAvailability({ available: data.available, reason: data.unavailableReason });
       setMessages(data.messages);
       void refreshInbox(); // opening the thread zeroed unread server-side; sync the badge
+      return data;
     } catch (e) {
       setError(errorMessage(e));
+      return null;
     }
   };
 
   useEffect(() => {
-    void load();
+    void (async () => {
+      const data = await load();
+      // Re-derive the retry bar from server truth so it survives a page refresh /
+      // re-open: a thread ending in an unanswered player text means its reply never
+      // landed. (The server only leaves a trailing player text when a reply failed.)
+      if (data) {
+        const last = data.messages[data.messages.length - 1];
+        if (last && last.sender === 'player') setFailed({ kind: 'reply' });
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId, dayTick]);
 
@@ -370,6 +404,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
     setGiftOpen(false);
     setGiftItems([]);
     setPendingGift(null);
+    setFailed(null);
   }, [characterId]);
 
   useEffect(() => {
@@ -384,7 +419,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
     // large image to JPEG) so an unsupported type is always rejected, regardless
     // of its size — the vision model can only read these formats.
     if (!(ALLOWED_IMAGE_MIME_TYPES as readonly string[]).includes(file.type)) {
-      setError(t('msg.unsupportedImage', { label: ALLOWED_IMAGE_LABEL }));
+      setError(t('messages.thread.unsupportedImage', { label: ALLOWED_IMAGE_LABEL }));
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
@@ -423,18 +458,37 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
     }
   };
 
-  const send = async () => {
-    const text = input.trim();
-    const image = pendingImage;
-    const gift = pendingGift;
+  // Subtle "warmer / cooler" cue from a relationship delta.
+  const showFeeling = (d: Partial<Record<string, number>>) => {
+    const net =
+      (d.affection ?? 0) + (d.comfort ?? 0) + (d.chemistry ?? 0) + (d.trust ?? 0) + (d.respect ?? 0) - (d.tension ?? 0);
+    if (net !== 0) {
+      setFeeling({ text: net > 0 ? t('messages.thread.warmer') : t('messages.thread.cooler'), warm: net > 0 });
+      setTimeout(() => setFeeling(null), 2200);
+    }
+  };
+
+  // `resend` carries a preserved payload for a retry; a normal send reads the live
+  // compose box. Either way the player's text is shown optimistically, then the
+  // thread is reconciled from the server (which is the source of truth).
+  const send = async (resend?: { text: string; image: { assetId: string; url: string } | null; gift: { inventoryItem: InventoryItem; item: ShopItem } | null }) => {
+    const text = (resend?.text ?? input).trim();
+    const image = resend ? resend.image : pendingImage;
+    const gift = resend ? resend.gift : pendingGift;
     if ((!text && !image && !gift) || sending || uploadingImage) return;
     // Defensive: the compose box is disabled when unavailable, but never POST a
     // text the server will reject (it 400s for a busy character).
     if (!availability.available) return;
-    setInput('');
-    setPendingImage(null);
-    setPendingGift(null);
-    setGiftOpen(false);
+    if (!resend) {
+      setInput('');
+      setPendingImage(null);
+      setPendingGift(null);
+      setGiftOpen(false);
+    }
+    // Baseline (server truth, no optimistic yet) to detect on failure whether THIS
+    // text actually persisted — by the player count growing, not the trailing sender.
+    const priorPlayerCount = messages.filter((m) => m.sender === 'player').length;
+    setFailed(null);
     setSending(true);
     setError(undefined);
     // Show the player's message immediately (reconciled by load() afterward).
@@ -457,24 +511,100 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       await load();
       // A gift was consumed from the bag — keep the held-money/inventory in sync.
       if (gift) await reloadPlayer();
-      if (res.error) setError(t('msg.noReply', { error: res.error }));
-      // Subtle cue that the exchange shifted how they feel.
-      const d = res.relationshipDelta ?? {};
-      const net =
-        (d.affection ?? 0) + (d.comfort ?? 0) + (d.chemistry ?? 0) + (d.trust ?? 0) + (d.respect ?? 0) - (d.tension ?? 0);
-      if (net !== 0) {
-        setFeeling(net > 0 ? t('msg.warmer') : t('msg.cooler'));
-        setTimeout(() => setFeeling(null), 2200);
+      if (res.error) {
+        // Your text saved, but the reply failed — offer to regenerate it.
+        setError(t('messages.thread.noReply', { error: res.error }));
+        setFailed({ kind: 'reply' });
       }
+      showFeeling(res.relationshipDelta ?? {});
     } catch (e) {
-      setError(errorMessage(e));
-      await load(); // drop the optimistic bubble if the send failed
+      // Reconcile (this drops the optimistic bubble), then classify by whether THIS
+      // text persisted — detected by the player-message count growing, NOT by the
+      // trailing sender (which is a stale prior reply for any follow-up message).
+      const data = await load();
+      if (!data) {
+        // Couldn't verify — keep the payload so a later retry can re-check safely.
+        setError(errorMessage(e));
+        setFailed({ kind: 'send', text, image, gift, priorPlayerCount });
+      } else {
+        const newPlayerCount = data.messages.filter((m) => m.sender === 'player').length;
+        const last = data.messages[data.messages.length - 1];
+        if (newPlayerCount > priorPlayerCount) {
+          // The text WAS saved. If a reply also landed, we're done; else regenerate.
+          if (last && last.sender === 'character') {
+            setError(undefined);
+          } else {
+            setError(errorMessage(e));
+            setFailed({ kind: 'reply' });
+          }
+        } else {
+          // Nothing persisted → keep the payload for a true resend.
+          setError(errorMessage(e));
+          setFailed({ kind: 'send', text, image, gift, priorPlayerCount });
+        }
+      }
     } finally {
       setSending(false);
     }
   };
 
-  const dayLabel = (m: TextMessage) => (m.dayNumber != null ? t('dash.hud.day', { day: m.dayNumber }) : t('msg.earlier'));
+  const retry = async () => {
+    if (!failed || sending || uploadingImage) return;
+    // Decide what to do. Regenerating a reply is always safe (it never duplicates
+    // the player text); resending re-POSTs and WOULD duplicate it if the server
+    // already saved it. So for a presumed-lost send, reconcile with server truth
+    // first and only resend when there's genuinely no unanswered player text.
+    let action: 'reply' | 'send' | 'abort' = failed.kind === 'reply' ? 'reply' : 'send';
+    if (failed.kind === 'send') {
+      setSending(true);
+      setError(undefined);
+      const data = await load();
+      setSending(false);
+      if (!data) return; // couldn't verify — keep the retry, don't risk a dup
+      const newPlayerCount = data.messages.filter((m) => m.sender === 'player').length;
+      const last = data.messages[data.messages.length - 1];
+      if (newPlayerCount > failed.priorPlayerCount) {
+        // The text WAS saved after all.
+        if (last && last.sender === 'character') {
+          setFailed(null); // already fully answered
+          return;
+        }
+        action = 'reply'; // saved but unanswered → regenerate (never duplicates)
+      } else {
+        action = 'send'; // genuinely not saved → resend
+      }
+    }
+
+    if (action === 'send' && failed.kind === 'send') {
+      const { text, image, gift } = failed;
+      setFailed(null);
+      await send({ text, image, gift });
+      return;
+    }
+
+    // Regenerate the reply for the saved player text. Not gated on availability:
+    // the text was already accepted, so we only need its reply.
+    setSending(true);
+    setError(undefined);
+    setFailed(null);
+    try {
+      const res = await api.phoneRetryReply(characterId);
+      await load();
+      if (res.error) {
+        setError(t('messages.thread.noReply', { error: res.error }));
+        setFailed({ kind: 'reply' });
+      } else {
+        showFeeling(res.relationshipDelta ?? {});
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+      setFailed({ kind: 'reply' }); // still recoverable
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const dayLabel = (m: TextMessage) => (m.dayNumber != null ? t('messages.day', { day: m.dayNumber }) : t('messages.earlier'));
 
   const claim = async (textId: string) => {
     if (claimingId) return; // a tap is in flight — don't double-claim the gift
@@ -492,15 +622,15 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title={character?.name ?? t('phone.app.messages')}
-        kicker={t('msg.texting')}
+        title={character?.name ?? t('messages.title')}
+        kicker={t('messages.texting')}
         left={
-          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}>
+          <button className="btn sm ghost pbar-iconbtn" onClick={onBack} aria-label={t('common:back')} title={t('common:back')}>
             <Icon name="chevronDown" size={18} />
           </button>
         }
       />
-      {error && <Banner kind="error">{error}</Banner>}
+      {error && !failed && <Banner kind="error">{error}</Banner>}
       <div className="pcom-thread">
         {messages.map((m, i) => {
           const label = dayLabel(m);
@@ -515,8 +645,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
               {showDivider && <div className="pcom-day">{label}</div>}
               <div className={`pcom-msg ${m.sender}`}>
                 {imgSrc && (
-                  <a className="pcom-image-link" href={imgSrc} target="_blank" rel="noreferrer" title={t('msg.openFull')}>
-                    <img className="pcom-image" src={imgSrc} alt={t('msg.sentPhoto')} loading="lazy" />
+                  <a className="pcom-image-link" href={imgSrc} target="_blank" rel="noreferrer" title={t('messages.thread.openFullSize')}>
+                    <img className="pcom-image" src={imgSrc} alt={t('messages.thread.sentPhoto')} loading="lazy" />
                   </a>
                 )}
                 {m.body && <div className="pcom-bubble">{m.body}</div>}
@@ -525,9 +655,9 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
                   <button className="pcom-gift" disabled={m.attachment.claimed || claimingId !== null} onClick={() => claim(m.id)}>
                     <span className="pcom-gift-icon"><Icon name="gift" size={20} /></span>
                     <span className="pcom-gift-text">
-                      <span className="pcom-gift-label">{m.attachment.claimed ? t('msg.gift.kept') : t('msg.gift.forYou')}</span>
+                      <span className="pcom-gift-label">{m.attachment.claimed ? t('messages.thread.kept') : t('messages.thread.giftForYou')}</span>
                       <span className="pcom-gift-name">
-                        {m.attachment.claimed ? m.attachment.name : t('msg.gift.accept', { name: m.attachment.name })}
+                        {m.attachment.claimed ? m.attachment.name : t('messages.thread.accept', { name: m.attachment.name })}
                       </span>
                     </span>
                   </button>
@@ -537,7 +667,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
                   <div className="pcom-gift pcom-gift-sent">
                     <span className="pcom-gift-icon"><Icon name="gift" size={20} /></span>
                     <span className="pcom-gift-text">
-                      <span className="pcom-gift-label">{t('msg.gift.sent')}</span>
+                      <span className="pcom-gift-label">{t('messages.thread.giftSent')}</span>
                       <span className="pcom-gift-name">{m.attachment.name}</span>
                     </span>
                   </div>
@@ -559,16 +689,16 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
         )}
         <div ref={endRef} />
       </div>
-      {feeling && <div className="pcom-feeling">{feeling}</div>}
+      {feeling && <div className={`pcom-feeling ${feeling.warm ? 'is-warm' : 'is-cool'}`}>{feeling.text}</div>}
       {pendingImage && (
         <div className="pcom-attach">
-          <img className="pcom-attach-thumb" src={pendingImage.url} alt={t('msg.attachPreview')} />
-          <span className="pcom-attach-label">{t('msg.photoReady')}</span>
+          <img className="pcom-attach-thumb" src={pendingImage.url} alt={t('messages.thread.attachmentPreview')} />
+          <span className="pcom-attach-label">{t('messages.thread.photoReady')}</span>
           <button
             className="pcom-attach-remove"
             onClick={() => setPendingImage(null)}
-            aria-label={t('msg.removeImage')}
-            title={t('msg.removeImage')}
+            aria-label={t('messages.thread.removeImage')}
+            title={t('messages.thread.removeImage')}
           >
             <Icon name="close" size={14} />
           </button>
@@ -577,12 +707,12 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       {pendingGift && (
         <div className="pcom-attach">
           <span className="pcom-attach-gifticon"><Icon name="gift" size={16} /></span>
-          <span className="pcom-attach-label">{t('msg.giftLabel', { name: pendingGift.item.name })}</span>
+          <span className="pcom-attach-label">{t('messages.thread.giftStaged', { name: pendingGift.item.name })}</span>
           <button
             className="pcom-attach-remove"
             onClick={() => setPendingGift(null)}
-            aria-label={t('msg.removeGift')}
-            title={t('msg.removeGift')}
+            aria-label={t('messages.thread.removeGift')}
+            title={t('messages.thread.removeGift')}
           >
             <Icon name="close" size={14} />
           </button>
@@ -591,7 +721,7 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
       {giftOpen && (
         <div className="pcom-giftmenu">
           {giftItems.length === 0 ? (
-            <p className="muted pcom-giftmenu-empty">{t('chat.gift.empty')}</p>
+            <p className="muted pcom-giftmenu-empty">{t('messages.thread.giftMenuEmpty')}</p>
           ) : (
             giftItems.map((e) => (
               <button key={e.inventoryItem.id} className="pcom-giftmenu-item" onClick={() => { setPendingGift(e); setGiftOpen(false); }}>
@@ -606,8 +736,22 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
         <div className="pcom-dnd-bar">
           <Icon name="moon" size={14} />
           <span>
-            {t('msg.dndBar', { name: character?.name ?? t('msg.they'), reason: availability.reason ?? t('msg.isUnavailableToday') })}
+            {t('messages.thread.dndBar', {
+              name: character?.name ?? t('messages.they'),
+              reason: availability.reason ?? t('messages.isUnavailableToday'),
+            })}
           </span>
+        </div>
+      )}
+      {failed && (
+        <div className="pcom-retry" role="alert">
+          <span className="pcom-retry-msg">
+            <Icon name="warn" size={13} />
+            {failed.kind === 'reply' ? t('messages.thread.replyFailed') : t('messages.thread.sendFailed')}
+          </span>
+          <button className="btn sm pcom-retry-btn" onClick={() => void retry()} disabled={sending || uploadingImage}>
+            <Icon name="refresh" size={13} /> {sending ? t('messages.thread.retrying') : t('messages.thread.retry')}
+          </button>
         </div>
       )}
       <div className="pcom-compose">
@@ -625,8 +769,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           className="btn ghost sm pcom-attachbtn"
           onClick={() => fileRef.current?.click()}
           disabled={sending || uploadingImage || !availability.available}
-          aria-label={t('msg.attachPhoto')}
-          title={t('msg.attachPhoto')}
+          aria-label={t('messages.thread.attachPhoto')}
+          title={t('messages.thread.attachPhoto')}
         >
           <Icon name={uploadingImage ? 'refresh' : 'image'} size={18} />
         </button>
@@ -634,8 +778,8 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           className={`btn ghost sm pcom-attachbtn${giftOpen || pendingGift ? ' pcom-attachbtn-on' : ''}`}
           onClick={() => void openGiftMenu()}
           disabled={sending || uploadingImage || !availability.available}
-          aria-label={t('msg.sendGift')}
-          title={t('msg.sendGift')}
+          aria-label={t('messages.thread.sendGift')}
+          title={t('messages.thread.sendGift')}
         >
           <Icon name="gift" size={18} />
         </button>
@@ -644,12 +788,12 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
           disabled={!availability.available}
           placeholder={
             !availability.available
-              ? t('msg.cantTalk', { name: character?.name ?? t('msg.they') })
+              ? t('messages.thread.cantTalk', { name: character?.name ?? t('messages.they') })
               : pendingImage
-                ? t('msg.addCaption')
+                ? t('messages.thread.addCaption')
                 : pendingGift
-                  ? t('msg.addNote')
-                  : t('msg.textName', { name: character?.name ?? '…' })
+                  ? t('messages.thread.addNote')
+                  : t('messages.thread.textPlaceholder', { name: character?.name ?? '…' })
           }
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -661,10 +805,10 @@ function ThreadView({ characterId, onBack }: { characterId: string; onBack: () =
         />
         <button
           className="btn primary sm pcom-send"
-          onClick={send}
+          onClick={() => void send()}
           disabled={sending || uploadingImage || !availability.available || (!input.trim() && !pendingImage && !pendingGift)}
-          aria-label={t('msg.send')}
-          title={t('msg.send')}
+          aria-label={t('messages.thread.send')}
+          title={t('messages.thread.send')}
         >
           <Icon name="send" size={16} />
         </button>

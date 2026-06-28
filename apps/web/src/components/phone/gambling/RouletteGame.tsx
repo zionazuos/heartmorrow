@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   rouletteColor,
   rouletteBetWins,
@@ -7,30 +8,48 @@ import {
 } from '@dsim/shared';
 import { api } from '../../../lib/api';
 import { errorMessage } from '../../../lib/hooks';
-import { useT, type TFunc } from '../../../i18n';
-import type { MessageKey } from '../../../i18n/locales/en';
 import { Banner } from '../../ui';
 import { ResultBanner, maxAffordable, type CasinoGameProps } from './shared';
 import './roulette.css';
 
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
+
 const DENOMS = [5, 25, 50, 100];
-const NUMBERS = Array.from({ length: 37 }, (_, i) => i); // 0..36
+
+/** European single-zero wheel order — 0, then strictly alternating red/black.
+ *  Painting the ring in THIS order (not numeric order) makes the colors alternate
+ *  like a real wheel instead of doubling up. */
+const WHEEL_ORDER = [
+  0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24,
+  16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26,
+];
+const SEG = 360 / WHEEL_ORDER.length; // degrees per pocket
+
+/** Standard table: three rows (columns 3 / 2 / 1), twelve numbers each. Far more
+ *  compact vertically than a 6×6 block, so the wheel stays on screen. */
+const GRID_ROWS = [
+  [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36],
+  [2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35],
+  [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34],
+];
+const GRID_NUMS = GRID_ROWS.flat();
 
 /** Parse a placed-bet key like 'red' / 'dozen:2' / 'straight:17' into a RouletteBet. */
 function parseKey(key: string, stake: number): RouletteBet {
   const [kind, val] = key.split(':');
   return { kind: kind as RouletteBet['kind'], value: val ? Number(val) : 0, stake };
 }
-const labelFor = (key: string, t: TFunc): string => {
+const labelFor = (key: string, t: TFn): string => {
   const [kind, val] = key.split(':');
   if (kind === 'straight') return val!;
-  if (kind === 'dozen') return t(`gmb.rl.dozen${val}` as MessageKey);
-  if (kind === 'column') return t('gmb.rl.col', { n: val ?? '' });
-  return t(`gmb.rl.${kind}` as MessageKey);
+  if (kind === 'dozen') return t(`gambling.dozen${val}`);
+  if (kind === 'column') return t('gambling.col', { n: val });
+  return t(`gambling.bet.${kind}`);
 };
 
 export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
+  const tt = t as unknown as TFn;
   const [chips, setChips] = useState<Record<string, number>>({});
   const [denom, setDenom] = useState(25);
   const [phase, setPhase] = useState<'bet' | 'spinning' | 'done'>('bet');
@@ -43,6 +62,15 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
   const top = maxAffordable(wallet);
   // `busy` covers the request round-trip; `spinning` covers the wheel animation.
   const locked = phase === 'spinning' || busy;
+
+  // The ring, painted as the real pockets in wheel order — each wedge its true color.
+  const wheelBg = useMemo(() => {
+    const stops = WHEEL_ORDER.map((n, i) => {
+      const c = n === 0 ? '#1f7a4d' : rouletteColor(n) === 'red' ? '#8e2f2f' : '#171b2e';
+      return `${c} ${(i * SEG).toFixed(3)}deg ${((i + 1) * SEG).toFixed(3)}deg`;
+    }).join(', ');
+    return `conic-gradient(from ${(-SEG / 2).toFixed(3)}deg, ${stops})`;
+  }, []);
 
   const place = (key: string) => {
     if (locked) return;
@@ -67,8 +95,15 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
       const res = await api.playRoulette(worldId, bets);
       setPhase('spinning');
       setResult(res);
-      // Land the ball on the number (stylized: position = number/37 of the ring).
-      setAngle((a) => a + 360 * 5 + (res.number / 37) * 360);
+      // Settle the ball on this number's pocket (its index in the wheel order),
+      // spinning several extra turns forward from wherever it last rested — so the
+      // landing is correct on every spin and the colour matches the result.
+      setAngle((a) => {
+        const target = WHEEL_ORDER.indexOf(res.number) * SEG;
+        const curr = ((a % 360) + 360) % 360;
+        const forward = (target - curr + 360) % 360;
+        return a + 360 * 6 + forward;
+      });
       onSettled(res.wallet);
     } catch (err) {
       setError(errorMessage(err));
@@ -82,17 +117,44 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
   };
 
   const landed = result && phase === 'done' ? result.number : null;
-  const winner = (key: string): boolean =>
-    landed != null && rouletteBetWins(parseKey(key, 1), landed);
+  // A bet only lights up as a win if the player ACTUALLY placed a chip on it — not
+  // every bet that happens to cover the landed number.
+  const placedWin = (key: string): boolean =>
+    landed != null && (chips[key] ?? 0) > 0 && rouletteBetWins(parseKey(key, 1), landed);
+  const placedLost = (key: string): boolean =>
+    landed != null && (chips[key] ?? 0) > 0 && !rouletteBetWins(parseKey(key, 1), landed);
   const chipKeys = Object.keys(chips);
+
+  const numClass = (n: number): string =>
+    `rl-num is-${rouletteColor(n)}${landed === n ? ' landed' : ''}${placedWin(`straight:${n}`) ? ' win' : ''}${placedLost(`straight:${n}`) ? ' lost' : ''}`;
 
   return (
     <div className="rl">
       {/* Wheel */}
       <div className="gmb-table rl-stage">
-        <div className="rl-wheel" style={{ ['--spin' as string]: `${angle}deg` }}>
-          <div className="rl-ring" />
-          <div className="rl-ball" onTransitionEnd={onBallStop} />
+        <div className="rl-wheel">
+          <div className="rl-ring" style={{ background: wheelBg }} />
+          {/* The numbers around the wheel, so you can watch the ball settle on one. */}
+          <div className="rl-pips" aria-hidden="true">
+            {WHEEL_ORDER.map((n, i) => {
+              const a = (i * SEG - 90) * (Math.PI / 180);
+              return (
+                <span
+                  key={n}
+                  className={`rl-pip is-${rouletteColor(n)}`}
+                  style={{
+                    left: `${50 + Math.cos(a) * 45}%`,
+                    top: `${50 + Math.sin(a) * 45}%`,
+                    // rotate each number to its spoke so it radiates like a real wheel
+                    transform: `translate(-50%, -50%) rotate(${i * SEG}deg)`,
+                  }}
+                >
+                  {n}
+                </span>
+              );
+            })}
+          </div>
+          <div className="rl-ball" style={{ ['--spin' as string]: `${angle}deg` }} onTransitionEnd={onBallStop} />
           <div className="rl-hub">
             {landed != null ? (
               <span className={`rl-landed is-${rouletteColor(landed)}`}>{landed}</span>
@@ -115,7 +177,7 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
       {/* Stake + chip selector */}
       <div className="rl-bankline">
         <span>
-          {t('gmb.rl.staked')} <b className="gmb-value">◈ {total}</b>
+          {t('gambling.staked')} <b className="gmb-value">◈ {total}</b>
         </span>
         <div className="rl-denoms">
           {DENOMS.filter((d) => d <= Math.max(top, DENOMS[0]!)).map((d) => (
@@ -125,23 +187,22 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
           ))}
         </div>
         <button className="rl-clear" onClick={clear} disabled={locked || total === 0}>
-          {t('gmb.rl.clear')}
+          {t('gambling.clear')}
         </button>
       </div>
 
-      {/* Number grid (straight-up bets) */}
+      {/* Number grid (straight-up bets) — standard 3×12 with 0 down the side */}
       <div className="rl-grid">
-        <button className={`rl-num is-green${winner('straight:0') ? ' win' : ''}`} onClick={() => place('straight:0')} disabled={locked}>
+        <button
+          className={`rl-num is-green${landed === 0 ? ' landed' : ''}${placedWin('straight:0') ? ' win' : ''}${placedLost('straight:0') ? ' lost' : ''}`}
+          onClick={() => place('straight:0')}
+          disabled={locked}
+        >
           0{chips['straight:0'] ? <i className="rl-chip">{chips['straight:0']}</i> : null}
         </button>
         <div className="rl-nums">
-          {NUMBERS.slice(1).map((n) => (
-            <button
-              key={n}
-              className={`rl-num is-${rouletteColor(n)}${winner(`straight:${n}`) ? ' win' : ''}`}
-              onClick={() => place(`straight:${n}`)}
-              disabled={locked}
-            >
+          {GRID_NUMS.map((n) => (
+            <button key={n} className={numClass(n)} onClick={() => place(`straight:${n}`)} disabled={locked}>
               {n}
               {chips[`straight:${n}`] ? <i className="rl-chip">{chips[`straight:${n}`]}</i> : null}
             </button>
@@ -152,33 +213,38 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
       {/* Outside bets */}
       <div className="rl-outside">
         {['dozen:1', 'dozen:2', 'dozen:3'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} t={t} />
+          <Cell key={k} k={k} chips={chips} win={placedWin(k)} lost={placedLost(k)} place={place} disabled={locked} t={tt} />
         ))}
       </div>
       <div className="rl-outside">
         {['column:1', 'column:2', 'column:3'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} t={t} />
+          <Cell key={k} k={k} chips={chips} win={placedWin(k)} lost={placedLost(k)} place={place} disabled={locked} t={tt} />
         ))}
       </div>
       <div className="rl-outside">
-        {['low', 'even', 'red'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} tone={k} t={t} />
-        ))}
-      </div>
-      <div className="rl-outside">
-        {['high', 'odd', 'black'].map((k) => (
-          <Cell key={k} k={k} chips={chips} winner={winner} place={place} disabled={locked} tone={k} t={t} />
+        {['red', 'black', 'even', 'odd', 'low', 'high'].map((k) => (
+          <Cell
+            key={k}
+            k={k}
+            chips={chips}
+            win={placedWin(k)}
+            lost={placedLost(k)}
+            place={place}
+            disabled={locked}
+            tone={k === 'red' || k === 'black' ? k : undefined}
+            t={tt}
+          />
         ))}
       </div>
 
       <div className="gmb-actions">
         <button className="gmb-go" onClick={spin} disabled={locked || total < wallet.minBet}>
-          {locked ? t('gmb.spinning') : total > 0 ? t('gmb.rl.spin', { total }) : t('gmb.rl.placeMin', { min: wallet.minBet })}
+          {locked ? t('gambling.spinning') : total > 0 ? t('gambling.spinTotal', { total }) : t('gambling.placeAtLeast', { min: wallet.minBet })}
         </button>
       </div>
       {chipKeys.length > 0 && phase !== 'spinning' && (
         <div className="gmb-muted">
-          {t('gmb.rl.onTable', { bets: chipKeys.map((k) => `${labelFor(k, t)} ◈${chips[k]}`).join(' · ') })}
+          {t('gambling.onTable', { bets: chipKeys.map((k) => `${labelFor(k, t as unknown as TFn)} ◈${chips[k]}`).join(' · ') })}
         </div>
       )}
     </div>
@@ -188,7 +254,8 @@ export function RouletteGame({ worldId, wallet, onSettled }: CasinoGameProps) {
 function Cell({
   k,
   chips,
-  winner,
+  win,
+  lost,
   place,
   disabled,
   tone,
@@ -196,15 +263,16 @@ function Cell({
 }: {
   k: string;
   chips: Record<string, number>;
-  winner: (k: string) => boolean;
+  win: boolean;
+  lost: boolean;
   place: (k: string) => void;
   disabled: boolean;
   tone?: string;
-  t: TFunc;
+  t: TFn;
 }) {
   return (
     <button
-      className={`rl-cell${tone ? ` tone-${tone}` : ''}${winner(k) ? ' win' : ''}`}
+      className={`rl-cell${tone ? ` tone-${tone}` : ''}${win ? ' win' : ''}${lost ? ' lost' : ''}`}
       onClick={() => place(k)}
       disabled={disabled}
     >

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DAILY_INCOME } from '@dsim/shared';
 import { resetDb, ScriptedAdapter } from '../test/helpers';
 import { createWorld } from './world-service';
 import { createCharacter } from './character-service';
@@ -58,7 +57,7 @@ describe('day records — live persistence', () => {
     // free/cheap actions that fire one event each and used to vanish from the recap.
     recordEvent('activity', { worldId: a.world.id, activityId: 'work_shift', kind: 'work', money: 50 });
     recordEvent('activity', { worldId: a.world.id, activityId: 'odd_jobs', kind: 'work', money: 50 });
-    recordEvent('activity', { worldId: a.world.id, activityId: 'bond_talk', kind: 'training', characterId: a.character.id, money: 0 });
+    recordEvent('activity', { worldId: a.world.id, activityId: 'tg_in', kind: 'together', characterId: a.character.id, money: 0 });
     recordEvent('text_reply', { characterId: a.character.id, tone: 'warm' });
 
     await advanceDay(a.world.id); // day 1 → 2
@@ -84,16 +83,15 @@ describe('day records — live persistence', () => {
     expect(rec!.headline).toMatch(/quiet/i);
   });
 
-  it('attributes income to the day it was credited (day 1 got none)', async () => {
+  it('records no passive income — there is no free daily stipend', async () => {
     const a = makeWorld('Alpha');
     getWorldState(a.world.id);
     await advanceDay(a.world.id); // ends day 1
     await advanceDay(a.world.id); // ends day 2
 
-    // Day 1 began with no rollover before it → no passive income on its record.
+    // Money is earned, not handed out — no day carries a passive-income line.
     expect(dayRecordsRepo.get(a.world.id, 1)!.income).toBe(0);
-    // Day 2 began with the daily credit.
-    expect(dayRecordsRepo.get(a.world.id, 2)!.income).toBe(DAILY_INCOME);
+    expect(dayRecordsRepo.get(a.world.id, 2)!.income).toBe(0);
   });
 });
 

@@ -126,7 +126,7 @@ function joinNames(names: string[], max = 4): string {
 /**
  * Beats for the day's REPEATABLE actions — work shifts, time spent bonding, and
  * texting. Unlike dates/milestones these can each happen many times a day (texting
- * is free; work/training only cost a little stamina), so rendering one beat per
+ * is free; work/together only cost a little stamina), so rendering one beat per
  * event would bury the day. They're collapsed here into at most one beat apiece,
  * and are deliberately kept OUT of RECAP_EVENT_TYPES so the per-event path never
  * also renders them. Feed this the day's FULL event list — it matches the event
@@ -145,7 +145,7 @@ export function summarizeRepeatables(events: GameEvent[]): DayRecordBeat[] {
       if (p.kind === 'work') {
         shifts += 1;
         earned += Number(p.money) || 0;
-      } else if (p.kind === 'training' && typeof p.characterId === 'string') {
+      } else if (p.kind === 'together' && typeof p.characterId === 'string') {
         bondedWith.set(p.characterId, true);
       }
     } else if (e.type === 'text_reply' && typeof p.characterId === 'string') {

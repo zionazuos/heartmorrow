@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   DAYS_OF_WEEK,
   SEASON_ICONS,
@@ -10,14 +11,11 @@ import {
 } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { useAppData } from '../../state/app-context';
-import { useT, type TFunc } from '../../i18n';
-import { seasonLabel, dayLabel } from '../../i18n/sharedLabels';
+import { seasonLabel, weatherLabel, weekday2, weekdayLabel } from '../../i18n/labels';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Empty, Spinner } from '../ui';
 import './phone-almanac.css';
-
-const WEEKDAY_ABBR = DAYS_OF_WEEK.map((d) => d.slice(0, 2)); // Mo Tu We … Su
 
 /** Which 28-day season-block a day falls in (0-based from day 1). */
 const blockOf = (day: number) => Math.floor((day - 1) / SEASON_LENGTH);
@@ -30,7 +28,8 @@ const BEAT_CLAMP_CHARS = 150;
 /** One "what happened" beat. Long beats (e.g. a fuller date recap) clamp to a few
  *  lines with an inline expand toggle; short beats render plain. Remounted per day
  *  (keyed by day) so the expanded state never leaks between days. */
-function DayBeat({ beat, t }: { beat: DayRecordBeat; t: TFunc }) {
+function DayBeat({ beat }: { beat: DayRecordBeat }) {
+  const { t } = useTranslation(['phone', 'common']);
   const [expanded, setExpanded] = useState(false);
   const long = beat.text.length > BEAT_CLAMP_CHARS;
   return (
@@ -42,7 +41,7 @@ function DayBeat({ beat, t }: { beat: DayRecordBeat; t: TFunc }) {
         <span className={`pal-beat-text${long && !expanded ? ' clamped' : ''}`}>{beat.text}</span>
         {long && (
           <button type="button" className="pal-beat-more" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? t('cal.showLess') : t('cal.showMore')}
+            {expanded ? t('calendar.showLess') : t('calendar.showMore')}
           </button>
         )}
       </div>
@@ -52,7 +51,7 @@ function DayBeat({ beat, t }: { beat: DayRecordBeat; t: TFunc }) {
 
 /** A calendar / almanac of every day: weather, what happened, and the day's recap. */
 export function CalendarApp() {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const { activeWorldId, dayTick } = useAppData();
   const [data, setData] = useState<WorldCalendar | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,10 +107,10 @@ export function CalendarApp() {
   if (!activeWorldId) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title={t('phone.app.calendar')} kicker={t('cal.kicker')} icon="calendar" />
+        <PhoneAppBar title={t('calendar.title')} kicker={t('calendar.kicker')} icon="calendar" />
         <div className="pal-app">
-          <Empty icon={<Icon name="calendar" size={36} />} title={t('phone.weather.noWorldTitle')}>
-            <p className="muted">{t('cal.noWorldBody')}</p>
+          <Empty icon={<Icon name="calendar" size={36} />} title={t('calendar.noWorldTitle')}>
+            <p className="muted">{t('calendar.noWorldBody')}</p>
           </Empty>
         </div>
       </div>
@@ -121,8 +120,8 @@ export function CalendarApp() {
   if (loading || !data) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title={t('phone.app.calendar')} kicker={t('cal.kicker')} icon="calendar" />
-        <div className="pal-app">{loading ? <Spinner /> : <p className="muted center">{t('cal.loadError')}</p>}</div>
+        <PhoneAppBar title={t('calendar.title')} kicker={t('calendar.kicker')} icon="calendar" />
+        <div className="pal-app">{loading ? <Spinner /> : <p className="muted center">{t('calendar.loadError')}</p>}</div>
       </div>
     );
   }
@@ -148,13 +147,13 @@ export function CalendarApp() {
     <div className="phone-app pal-host">
       <div className="pal-base" ref={baseRef}>
       <PhoneAppBar
-        title={t('phone.app.calendar')}
-        kicker={t('cal.kicker')}
+        title={t('calendar.title')}
+        kicker={t('calendar.kicker')}
         icon="calendar"
         right={
           viewBlock !== currentBlock ? (
-            <button className="pal-today-btn" onClick={goToToday} title={t('cal.jumpToday')}>
-              {t('phone.weather.today')}
+            <button className="pal-today-btn" onClick={goToToday} title={t('calendar.jumpToToday')}>
+              {t('calendar.today')}
             </button>
           ) : null
         }
@@ -167,17 +166,17 @@ export function CalendarApp() {
             className="pal-nav"
             onClick={() => setBlock(Math.max(0, viewBlock - 1))}
             disabled={viewBlock <= 0}
-            aria-label={t('cal.prevSeason')}
+            aria-label={t('calendar.prevSeason')}
           >
             <Icon name="chevronRight" size={18} className="pal-flip" />
           </button>
           <div className="pal-season-mid">
             <span className="pal-season-icon">{SEASON_ICONS[headCal.season]}</span>
             <div className="pal-season-text">
-              <span className="pal-season-name">{seasonLabel(t, headCal.season)}</span>
+              <span className="pal-season-name">{seasonLabel(headCal.season)}</span>
               <span className="pal-season-sub">
-                {hasYears ? t('cal.year', { year: yearOf(firstDay) }) : ''}
-                {t('cal.daysRange', { from: firstDay, to: firstDay + SEASON_LENGTH - 1 })}
+                {hasYears ? t('calendar.yearPrefix', { year: yearOf(firstDay) }) : ''}
+                {t('calendar.daysRange', { from: firstDay, to: firstDay + SEASON_LENGTH - 1 })}
               </span>
             </div>
           </div>
@@ -185,7 +184,7 @@ export function CalendarApp() {
             className="pal-nav"
             onClick={() => setBlock(Math.min(currentBlock, viewBlock + 1))}
             disabled={viewBlock >= currentBlock}
-            aria-label={t('cal.nextSeason')}
+            aria-label={t('calendar.nextSeason')}
           >
             <Icon name="chevronRight" size={18} />
           </button>
@@ -193,9 +192,9 @@ export function CalendarApp() {
 
         {/* Weekday legend — every season starts on a Monday. */}
         <div className="pal-week">
-          {WEEKDAY_ABBR.map((w, i) => (
+          {DAYS_OF_WEEK.map((d, i) => (
             <span key={i} className={`pal-wd${i >= 5 ? ' is-weekend' : ''}`}>
-              {w}
+              {weekday2(d)}
             </span>
           ))}
         </div>
@@ -219,6 +218,18 @@ export function CalendarApp() {
             ]
               .filter(Boolean)
               .join(' ');
+            // Fold every aria-hidden cell signal (weather, holiday, event dots)
+            // into one spoken label so AT users get what sighted users see.
+            const ariaLabel = [
+              t('calendar.dayN', { d }),
+              weekdayLabel(cal.dayOfWeek),
+              entry ? weatherLabel(entry.weather.kind) : null,
+              cal.holiday ? t('calendar.holidayAria', { name: cal.holiday.name }) : null,
+              beatCount > 0 ? t('calendar.eventCount', { count: beatCount }) : null,
+              isToday ? t('calendar.today') : isFuture ? t('calendar.upcoming') : null,
+            ]
+              .filter(Boolean)
+              .join(', ');
             return (
               <button
                 key={d}
@@ -226,7 +237,8 @@ export function CalendarApp() {
                 style={{ animationDelay: `${Math.min(i * 11, 260)}ms` }}
                 disabled={isFuture}
                 onClick={() => !isFuture && openDay(d)}
-                title={`${t('cal.cellTitle', { day: d, dow: dayLabel(t, cal.dayOfWeek) })}${cal.holiday ? ` · ${cal.holiday.name}` : ''}`}
+                aria-label={ariaLabel}
+                title={t('calendar.cellTitle', { day: d, weekday: weekdayLabel(cal.dayOfWeek) }) + (cal.holiday ? ` · ${cal.holiday.name}` : '')}
               >
                 <span className="pal-cell-day">{d}</span>
                 <span className="pal-cell-wx" aria-hidden="true">
@@ -237,21 +249,21 @@ export function CalendarApp() {
                     ✦
                   </span>
                 )}
-                {beatCount > 0 && !isToday && (
+                {beatCount > 0 && (
                   <span className="pal-cell-dots" aria-hidden="true">
                     {rec!.beats.slice(0, 3).map((b, bi) => (
                       <i key={bi} className={`tone-${b.tone}`} />
                     ))}
                   </span>
                 )}
-                {isToday && <span className="pal-cell-today">{t('phone.weather.today')}</span>}
+                {isToday && <span className="pal-cell-today">{t('calendar.today')}</span>}
               </button>
             );
           })}
         </div>
 
         <p className="pal-foot">
-          {data.currentDay > 1 ? t('cal.footActive') : t('cal.footStart')}
+          {data.currentDay > 1 ? t('calendar.footPast') : t('calendar.footStart')}
         </p>
       </div>
       </div>
@@ -285,7 +297,7 @@ function DayDetail({
   onClose: () => void;
   onClosed: () => void;
 }) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const cal = deriveCalendar(day);
   const rec = entry?.record ?? null;
   const hasSummary = !!(rec && (rec.headline || rec.narrative));
@@ -313,15 +325,15 @@ function DayDetail({
       className={`pal-detail ${closing ? 'is-closing' : 'is-opening'}`}
       role="dialog"
       aria-modal="true"
-      aria-label={t('cal.detailAria', { day })}
+      aria-label={t('calendar.detailAria', { day })}
     >
       <div className="pal-detail-bar">
-        <button className="pal-back" onClick={onClose} aria-label={t('cal.backToCalendar')} ref={backRef}>
+        <button className="pal-back" onClick={onClose} aria-label={t('calendar.backToCalendar')} ref={backRef}>
           <Icon name="chevronRight" size={18} className="pal-flip" />
-          <span>{t('cal.kicker')}</span>
+          <span>{t('calendar.calendarLabel')}</span>
         </button>
         {rec && rec.income > 0 && (
-          <span className="pal-coin" title={t('cal.dailyIncome')}>
+          <span className="pal-coin" title={t('calendar.dailyIncome')}>
             <Icon name="coin" size={13} /> +{rec.income}
           </span>
         )}
@@ -330,14 +342,14 @@ function DayDetail({
       <div className="pal-detail-scroll">
         {/* Date plate */}
         <div className="pal-plate">
-          <div className="pal-plate-day">{t('dash.hud.day', { day })}</div>
+          <div className="pal-plate-day">{t('calendar.dayN', { d: day })}</div>
           <div className="pal-plate-when">
-            {SEASON_ICONS[cal.season]} {dayLabel(t, cal.dayOfWeek)} · {seasonLabel(t, cal.season)} {cal.seasonDay}
-            {cal.isWeekend ? ` · ${t('dash.hud.weekend')}` : ''}
+            {SEASON_ICONS[cal.season]} {weekdayLabel(cal.dayOfWeek)} · {seasonLabel(cal.season)} {cal.seasonDay}
+            {cal.isWeekend ? t('calendar.weekendSuffix') : ''}
           </div>
           {entry && (
             <div className="pal-plate-wx">
-              <span className="pal-plate-wx-icon">{entry.weather.icon}</span> {t('phone.weather.itsLabel', { label: entry.weather.label })}
+              <span className="pal-plate-wx-icon">{entry.weather.icon}</span> {t('weather.itsLabel', { label: weatherLabel(entry.weather.kind) })}
             </div>
           )}
         </div>
@@ -361,21 +373,23 @@ function DayDetail({
                 ))}
               </ul>
             )}
-            {rec!.reconstructed && <div className="pal-recon">{t('cal.reconstructed')}</div>}
+            {rec!.reconstructed && <div className="pal-recon">{t('calendar.reconstructed')}</div>}
           </div>
         ) : (
           <div className="pal-recap pal-recap-quiet">
-            <p className="muted">{isToday ? t('cal.todayUnfolding') : t('cal.quietDay')}</p>
+            <p className="muted">
+              {isToday ? t('calendar.stillUnfolding') : t('calendar.quietDay')}
+            </p>
           </div>
         )}
 
         {/* What happened — the day's beats */}
         {rec && rec.beats.length > 0 && (
           <>
-            <div className="pal-eyebrow">{t('cal.whatHappened')}</div>
+            <div className="pal-eyebrow">{t('calendar.whatHappened')}</div>
             <div className="pal-beats">
               {rec.beats.map((b, i) => (
-                <DayBeat key={`${day}-${i}`} beat={b} t={t} />
+                <DayBeat key={`${day}-${i}`} beat={b} />
               ))}
             </div>
           </>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   RELATIONSHIP_STAT_KEYS,
   currentStatus,
@@ -31,11 +32,10 @@ import {
   type PropertyView,
   type ActiveDate,
 } from '@dsim/shared';
-import { api, streamChat, assetUrl } from '../lib/api';
+import { api, streamChat, streamRetry, assetUrl } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
-import { useT } from '../i18n';
-import { statusLabel, phaseLabel, dayLabel, seasonLabel, intentLabel } from '../i18n/sharedLabels';
+import { intentLabel, phaseLabel, relationshipStatusLabel, seasonLabel, weekdayLabel } from '../i18n/labels';
 import { Portrait } from '../components/Portrait';
 import { Icon } from '../components/Icon';
 import { RelationshipBars } from '../components/StatBars';
@@ -57,12 +57,12 @@ function DateTrajectory({
   label: string;
   pulse: { delta: number; key: number } | null;
 }) {
-  const t = useT();
+  const { t } = useTranslation(['pages', 'common']);
   const tone = value >= 60 ? 'good' : value < 40 ? 'bad' : 'mid';
   const mag = Math.max(0, Math.min(50, Math.abs(value - 50))); // 0..50 → 0..50% of the track
   const side = value >= 50 ? 'warm' : 'cool';
   return (
-    <div className={`date-trajectory tone-${tone}`} role="img" aria-label={t('chat.traj.aria', { label })}>
+    <div className={`date-trajectory tone-${tone}`} role="img" aria-label={t('chat.trajectoryAria', { label })}>
       {pulse && pulse.delta !== 0 && (
         <div className="dt-pulse-wrap" key={pulse.key} aria-hidden="true">
           <span className={`dt-pulse ${pulse.delta > 0 ? 'up' : 'down'}`}>
@@ -76,17 +76,17 @@ function DateTrajectory({
         <span className={`dt-fill ${side}`} style={{ width: `${mag}%` }} />
       </div>
       <div className="dt-foot">
-        <span className="dt-end">{t('chat.traj.cooling')}</span>
+        <span className="dt-end">{t('chat.cooling')}</span>
         <span className="dt-now">{label}</span>
-        <span className="dt-end">{t('chat.traj.warming')}</span>
+        <span className="dt-end">{t('chat.warming')}</span>
       </div>
     </div>
   );
 }
 
 export function Chat() {
+  const { t } = useTranslation(['pages', 'common']);
   const [params] = useSearchParams();
-  const t = useT();
   const { player, reloadPlayer, refreshWorldState, activeWorldId, worldState, dayTick, activeDate, activeDateLoaded, refreshActiveDate, assetById } =
     useAppData();
   const [availability, setAvailability] = useState<Record<string, { available: boolean; reason: string | null }>>({});
@@ -98,7 +98,8 @@ export function Chat() {
   const [setup, setSetup] = useState({
     characterId: params.get('character') ?? '',
     mode: 'date' as ConversationMode,
-    locationId: '',
+    // "Anywhere" (the server auto-picks a free venue, else the cheapest affordable one).
+    locationId: 'anywhere',
   });
   const [setupWorld, setSetupWorld] = useState<World | null>(null);
   const [setupProperties, setSetupProperties] = useState<PropertyView[]>([]);
@@ -133,6 +134,16 @@ export function Chat() {
   const [resuming, setResuming] = useState(false);
   const [resumeFailed, setResumeFailed] = useState(false);
   const [notice, setNotice] = useState<string>();
+  // A turn that didn't land, with how to recover it. 'reply' = your message was
+  // saved but the reply failed/dropped → regenerate it (no duplicate). 'send' =
+  // nothing saved → resend the original text + intent (kept here).
+  const [failed, setFailed] = useState<
+    | { kind: 'reply' }
+    // priorPlayerTurns: player-turn count BEFORE this send — lets a retry tell "my
+    // turn was saved" (count grew) from "a stale prior reply is trailing".
+    | { kind: 'send'; text: string; intent?: Intent; priorPlayerTurns: number }
+    | null
+  >(null);
   const [walkout, setWalkout] = useState<string | null>(null);
   // Live "how it's going" read: the vibe word, the numeric trajectory (0..100,
   // internal — center 50), and the signed change this turn for the +N/−N flourish.
@@ -324,6 +335,7 @@ export function Chat() {
     setBrokeUp(false);
     setRapportPulse(null);
     setIntent(null);
+    setFailed(null);
     try {
       const [c, sm] = await Promise.all([api.getCharacter(ad.characterId), api.getConversation(ad.sessionId)]);
       // The context can briefly point at a session that just ended elsewhere — never
@@ -338,6 +350,10 @@ export function Chat() {
       setSession(sm.session);
       setCharacter(c);
       setMessages(sm.messages);
+      // Re-derive the retry bar from server truth so it survives a refresh / resume:
+      // a transcript ending in an unanswered player turn means the reply never came.
+      const lastMsg = sm.messages[sm.messages.length - 1];
+      if (lastMsg && lastMsg.role === 'player') setFailed({ kind: 'reply' });
       setRelationship(await api.getRelationship(c.id));
       setExpression(null);
       setVibe(ad.vibe);
@@ -401,6 +417,7 @@ export function Chat() {
     setResumeFailed(false);
     setScene(null);
     setIntent(null);
+    setFailed(null);
     try {
       const c = await api.getCharacter(setup.characterId);
       const created = await api.createConversation({
@@ -446,39 +463,65 @@ export function Chat() {
     }
   };
 
-  const send = async () => {
-    const text = input.trim();
+  // `resend` carries a preserved payload for a retry; a normal send reads the live
+  // composer. `playerPersisted` tracks whether the server saved the player turn
+  // (the `player` event fired) so a failure can pick the right recovery: regenerate
+  // the reply (text saved) vs. resend the whole turn (nothing saved).
+  const send = async (resend?: { text: string; intent?: Intent }) => {
+    const text = (resend?.text ?? input).trim();
     if (!text || !session || streaming.active || busy) return;
-    const chosenIntent = intent ?? undefined;
-    setInput('');
-    setIntent(null);
+    const chosenIntent = resend ? resend.intent : intent ?? undefined;
+    if (!resend) {
+      setInput('');
+      setIntent(null);
+    }
     setError(undefined);
     setNotice(undefined);
+    setFailed(null);
     setStreaming({ active: true, text: '' });
     const controller = new AbortController();
     abortRef.current = controller;
+    let playerPersisted = false;
+    let settled = false; // a terminal event (done/error/walkout/…) arrived
+    // Baseline to detect (on a retry) whether THIS turn persisted despite a missed
+    // 'player' event — by the player-turn count growing, not the trailing role.
+    const priorPlayerTurns = messages.filter((m) => m.role === 'player').length;
+    const recover = () =>
+      playerPersisted ? { kind: 'reply' as const } : { kind: 'send' as const, text, intent: chosenIntent, priorPlayerTurns };
     try {
       await streamChat(
         session.id,
         text,
         {
-          onPlayer: (m) => setMessages((prev) => [...prev, m]),
+          onPlayer: (m) => {
+            playerPersisted = true;
+            setMessages((prev) => [...prev, m]);
+          },
           onDelta: (delta) => setStreaming((s) => ({ active: true, text: s.text + delta })),
           onDone: (m) => {
-            setMessages((prev) => [...prev, m]);
+            settled = true;
+            setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
             setStreaming({ active: false, text: '' });
           },
           onError: (msg) => {
+            settled = true;
             setError(msg);
             setStreaming({ active: false, text: '' });
+            setFailed(recover());
           },
           onNotice: (msg) => setNotice(msg),
           onWalkout: (m, reason) => {
+            // The character stormed out. Show the walkout moment, then run the normal
+            // end-and-evaluate flow so the blown-up date is scored in full (stamina,
+            // deltas, memories, milestones) — same as a deliberately-ended date.
+            settled = true;
             setMessages((prev) => [...prev, m]);
             setStreaming({ active: false, text: '' });
-            setWalkout(reason || t('chat.walkout.default'));
+            setWalkout(reason || t('chat.walkoutDefault'));
+            void endDate();
           },
           onBreakupIntent: (m, reaction) => {
+            settled = true;
             setMessages((prev) => [...prev, m]);
             setStreaming({ active: false, text: '' });
             setBreakupPending({ reaction });
@@ -490,18 +533,125 @@ export function Chat() {
             if (delta) setRapportPulse((p) => ({ delta, key: (p?.key ?? 0) + 1 }));
           },
           onLeft: (m) => {
+            // The character lost interest and called it a night. Show the soft-exit
+            // moment, then run the normal end-and-evaluate flow so the flat date is
+            // scored in full (stamina, deltas, memories) like any ended date.
+            settled = true;
             setMessages((prev) => [...prev, m]);
             setStreaming({ active: false, text: '' });
             setLeftEarly(true);
             setVibe(null);
+            void endDate();
+          },
+          onFarewell: (m, expr) => {
+            // The player ended the date by chatting (a natural goodbye). Show the
+            // character's send-off, then run the normal end-and-evaluate flow so the
+            // date is scored in full — no need to click "End & evaluate".
+            settled = true;
+            setMessages((prev) => [...prev, m]);
+            setStreaming({ active: false, text: '' });
+            if (expr) setExpression(expr);
+            void endDate();
           },
         },
         controller.signal,
         chosenIntent,
       );
+      // The stream ended with no terminal event (the connection dropped mid-reply):
+      // recover instead of leaving the typing indicator spinning forever.
+      if (!settled && !controller.signal.aborted) {
+        setStreaming({ active: false, text: '' });
+        setError(t('chat.replyDropped'));
+        setFailed(recover());
+      }
     } catch (e) {
       // Aborts are expected when the user resets/navigates; ignore them.
-      if (!controller.signal.aborted) setError(errorMessage(e));
+      if (!controller.signal.aborted) {
+        setError(errorMessage(e));
+        setFailed(recover());
+      }
+      setStreaming({ active: false, text: '' });
+    }
+  };
+
+  // Recover a failed turn: resend a lost message, or regenerate a reply when the
+  // player's message was saved but the reply failed (no duplicate player turn).
+  const retry = async () => {
+    if (!session || !failed || streaming.active || busy) return;
+    // Regenerating a reply never adds a player turn; resending re-POSTs /stream and
+    // WOULD duplicate the turn if the server actually saved it (we may have missed
+    // the 'player' event on a drop). So for a presumed-lost send, reconcile with
+    // server truth first and only resend when there's no unanswered player turn.
+    let action: 'reply' | 'send' | 'abort' = failed.kind === 'reply' ? 'reply' : 'send';
+    if (failed.kind === 'send') {
+      setBusy(true);
+      try {
+        const sm = await api.getConversation(session.id);
+        const newPlayerTurns = sm.messages.filter((m) => m.role === 'player').length;
+        const last = sm.messages[sm.messages.length - 1];
+        if (newPlayerTurns > failed.priorPlayerTurns) {
+          // The turn WAS saved (count grew). If a reply also landed, we're done.
+          if (last && last.role === 'character') {
+            setMessages(sm.messages);
+            setFailed(null);
+            return;
+          }
+          action = 'reply'; // saved but unanswered → regenerate
+        } else {
+          action = 'send'; // genuinely not saved → resend
+        }
+      } catch {
+        action = 'abort'; // couldn't verify — keep the retry, don't risk a dup
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    if (action === 'abort') return; // payload preserved in `failed`; they can retry again
+    if (action === 'send' && failed.kind === 'send') {
+      const { text, intent: keptIntent } = failed;
+      setFailed(null);
+      await send({ text, intent: keptIntent });
+      return;
+    }
+
+    setFailed(null);
+    setError(undefined);
+    setNotice(undefined);
+    setStreaming({ active: true, text: '' });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let settled = false;
+    try {
+      await streamRetry(
+        session.id,
+        {
+          onDelta: (delta) => setStreaming((s) => ({ active: true, text: s.text + delta })),
+          onDone: (m) => {
+            settled = true;
+            setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+            setStreaming({ active: false, text: '' });
+          },
+          onError: (msg) => {
+            settled = true;
+            setError(msg);
+            setStreaming({ active: false, text: '' });
+            setFailed({ kind: 'reply' });
+          },
+          onNotice: (msg) => setNotice(msg),
+        },
+        controller.signal,
+      );
+      if (!settled && !controller.signal.aborted) {
+        setStreaming({ active: false, text: '' });
+        setError(t('chat.replyDropped'));
+        setFailed({ kind: 'reply' });
+      }
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setError(errorMessage(e));
+        setFailed({ kind: 'reply' });
+      }
       setStreaming({ active: false, text: '' });
     }
   };
@@ -528,6 +678,7 @@ export function Chat() {
     setBrokeUp(false);
     setScene(null);
     setIntent(null);
+    setFailed(null);
   };
 
   // A world switch must not leave a different world's date streaming into view.
@@ -717,21 +868,21 @@ export function Chat() {
       return (
         <div className="stack">
           <div className="page-head">
-            <div className="kicker">{t('chat.setup.kicker')}</div>
-            <h1>{t('chat.onDate.title')}</h1>
-            <p>{t('chat.onDate.lede', { name: activeDate.characterName })}</p>
+            <div className="kicker">{t('chat.tonightsPlan')}</div>
+            <h1>{t('chat.onADateTitle')}</h1>
+            <p>{t('chat.onADateBody', { name: activeDate.characterName })}</p>
           </div>
           {error && <Banner kind="error">{error}</Banner>}
           <div className="framed date-setup">
-            <p>{t('chat.onDate.reopenFail')}</p>
+            <p>{t('chat.reopenFailed')}</p>
             <button className="btn primary block" onClick={() => void resume(activeDate)} disabled={resuming}>
               {resuming ? (
                 <>
-                  <span className="date-btn-spinner" aria-hidden="true" /> {t('chat.onDate.reopening')}
+                  <span className="date-btn-spinner" aria-hidden="true" /> {t('chat.reopening')}
                 </>
               ) : (
                 <>
-                  <Icon name="date" size={16} /> {t('chat.onDate.resume', { name: activeDate.characterName })}
+                  <Icon name="date" size={16} /> {t('chat.resumeDate', { name: activeDate.characterName })}
                 </>
               )}
             </button>
@@ -747,26 +898,26 @@ export function Chat() {
     return (
       <div className="stack">
         <div className="page-head">
-          <div className="kicker">{t('chat.setup.kicker')}</div>
-          <h1>{t('chat.plan.title')}</h1>
-          <p>{t('chat.plan.lede')}</p>
+          <div className="kicker">{t('chat.tonightsPlan')}</div>
+          <h1>{t('chat.planADate')}</h1>
+          <p>{t('chat.planSub')}</p>
         </div>
         {error && <Banner kind="error">{error}</Banner>}
         {characters.length === 0 ? (
-          <Empty icon="💬" title={t('chat.plan.emptyTitle')}>
-            <p>{t('chat.plan.emptyLede')}</p>
+          <Empty icon="💬" title={t('chat.noCharsTitle')}>
+            <p>{t('chat.noCharsBody')}</p>
           </Empty>
         ) : (
           <div className="framed date-setup">
             <div className="date-setup-head">
               <div className="date-setup-mark" aria-hidden="true" />
               <div>
-                <div className="kicker date-setup-kicker">{t('chat.plan.arrangeKicker')}</div>
-                <h2>{t('chat.plan.arrangeTitle')}</h2>
+                <div className="kicker date-setup-kicker">{t('chat.arrangeEvening')}</div>
+                <h2>{t('chat.whoWhereWhen')}</h2>
               </div>
             </div>
             <div className="date-pick">
-              <div className="kicker">{t('chat.plan.who')}</div>
+              <div className="kicker">{t('chat.whoMeeting')}</div>
               <div className="date-pick-grid">
                 {characters
                   .filter((c) => !activeWorldId || c.worldId === activeWorldId)
@@ -779,9 +930,9 @@ export function Chat() {
                         key={c.id}
                         type="button"
                         className={`date-pick-card${selected ? ' selected' : ''}${unavailable ? ' unavailable' : ''}`}
-                        onClick={() => setSetup((s) => ({ ...s, characterId: c.id, locationId: '' }))}
+                        onClick={() => setSetup((s) => ({ ...s, characterId: c.id, locationId: 'anywhere' }))}
                         disabled={unavailable}
-                        title={unavailable ? t('chat.plan.unavailableTitle', { name: c.name, reason: avail?.reason ?? t('chat.plan.unavailableToday') }) : t('chat.plan.meet', { name: c.name })}
+                        title={unavailable ? t('chat.cardTitleUnavailable', { name: c.name, reason: avail?.reason ?? t('chat.unavailableToday') }) : t('chat.cardTitleMeet', { name: c.name })}
                       >
                         {selected && (
                           <span className="date-pick-check" aria-hidden="true">
@@ -793,7 +944,7 @@ export function Chat() {
                         </div>
                         <div className="date-pick-name">{c.name}</div>
                         <div className="date-pick-sub">
-                          {unavailable ? (avail?.reason ?? t('chat.plan.busyToday')) : `${c.age} · ${c.pronouns}`}
+                          {unavailable ? (avail?.reason ?? t('chat.busyToday')) : t('chat.agePronouns', { age: c.age, pronouns: c.pronouns })}
                         </div>
                       </button>
                     );
@@ -801,7 +952,7 @@ export function Chat() {
               </div>
             </div>
             {((setupWorld && setupWorld.locations.length > 0) || roomUnlocked || setupProperties.length > 0) && (
-              <Field label={t('chat.plan.locationLabel')}>
+              <Field label={t('chat.locationField')}>
                 {(() => {
                   // One unified list of pickable venues rendered as photo tiles.
                   // Each tile: a value (locationId), label, optional sub-line,
@@ -814,8 +965,27 @@ export function Chat() {
                     glyph: string;
                     disabled?: boolean;
                   };
+                  // "Anywhere" lets the server pick: the first free public venue, else
+                  // the cheapest one you can afford. Mirror that here so the tile shows
+                  // the right cost (and disables when nothing's affordable).
+                  const locs = setupWorld?.locations ?? [];
+                  const anyFree = locs.some((l) => venueCost(l.priceTier) === 0);
+                  const cheapestAffordablePaid = [...locs]
+                    .filter((l) => venueCost(l.priceTier) > 0)
+                    .sort((a, b) => venueCost(a.priceTier) - venueCost(b.priceTier))
+                    .find((l) => venueCost(l.priceTier) <= wallet);
+                  const anywhereBroke = locs.length > 0 && !anyFree && !cheapestAffordablePaid;
+                  const anywhereSub =
+                    anyFree || locs.length === 0
+                      ? t('chat.free')
+                      : anywhereBroke
+                        ? t('chat.cantAffordAny')
+                        : t('chat.venueCost', {
+                            symbol: venueTierMeta(cheapestAffordablePaid!.priceTier).symbol,
+                            cost: venueCost(cheapestAffordablePaid!.priceTier),
+                          });
                   const tiles: Tile[] = [
-                    { value: '', label: t('chat.venue.anywhere'), sub: t('chat.venue.free'), glyph: '✨' },
+                    { value: 'anywhere', label: t('chat.anywhere'), sub: anywhereSub, glyph: '✨', disabled: anywhereBroke },
                   ];
                   for (const pv of setupProperties) {
                     // Date at a property you OWN or currently LEASE (both free — the
@@ -824,7 +994,7 @@ export function Chat() {
                     tiles.push({
                       value: `prop:${pv.property.id}`,
                       label: pv.property.name,
-                      sub: `${pv.owned ? t('chat.venue.yourPlace') : t('chat.venue.leased')} · ${t('chat.venue.free')}`,
+                      sub: `${pv.owned ? t('chat.yourPlace') : t('chat.leased')}${t('chat.freeSuffix')}`,
                       image: assetById(pv.property.assetId)?.path,
                       glyph: '🏠',
                     });
@@ -836,22 +1006,23 @@ export function Chat() {
                     tiles.push({
                       value: l.id,
                       label: l.name,
-                      sub: cost > 0 ? `${meta.symbol} ${cost}${broke ? t('chat.venue.cantAfford') : ''}` : t('chat.venue.free'),
+                      sub: cost > 0 ? `${t('chat.venueCost', { symbol: meta.symbol, cost })}${broke ? t('chat.cantAffordSuffix') : ''}` : t('chat.free'),
                       image: assetById(l.imageAssetId)?.path,
                       glyph: '📍',
                       disabled: broke,
                     });
                   }
                   if (roomUnlocked) {
+                    const partnerName = characters.find((c) => c.id === setup.characterId)?.name;
                     tiles.push({
                       value: `room:${setup.characterId}`,
-                      label: t('chat.venue.room', { name: characters.find((c) => c.id === setup.characterId)?.name ?? t('common.someone') }),
-                      sub: t('chat.venue.stayInFree'),
+                      label: partnerName ? t('chat.roomName', { name: partnerName }) : t('chat.theirRoomName'),
+                      sub: t('chat.stayInFree'),
                       glyph: '🚪',
                     });
                   }
                   return (
-                    <div className="date-loc-grid" role="radiogroup" aria-label={t('chat.venue.chooseAria')}>
+                    <div className="date-loc-grid" role="radiogroup" aria-label={t('chat.chooseLocation')}>
                       {tiles.map((tile) => {
                         const selected = setup.locationId === tile.value;
                         return (
@@ -863,7 +1034,7 @@ export function Chat() {
                             className={`date-loc-card${selected ? ' selected' : ''}${tile.disabled ? ' unavailable' : ''}`}
                             onClick={() => !tile.disabled && setSetup((s) => ({ ...s, locationId: tile.value }))}
                             disabled={tile.disabled}
-                            title={tile.disabled ? t('chat.venue.cantAffordTitle', { label: tile.label }) : tile.label}
+                            title={tile.disabled ? t('chat.tileTitleCantAfford', { label: tile.label }) : tile.label}
                           >
                             <div className="date-loc-photo">
                               {tile.image ? (
@@ -884,21 +1055,21 @@ export function Chat() {
                   );
                 })()}
                 <div className="muted" style={{ fontSize: '0.78rem', marginTop: '0.5rem' }}>
-                  {t('chat.venue.walletNote', { wallet })}
+                  {t('chat.walletNote', { wallet })}
                 </div>
               </Field>
             )}
             {setup.characterId && availability[setup.characterId] && !availability[setup.characterId]!.available && (
               <div className="banner error" style={{ fontSize: '0.82rem' }}>
-                {t('chat.plan.unavailBanner', {
-                  name: characters.find((c) => c.id === setup.characterId)?.name ?? t('common.someone'),
-                  reason: availability[setup.characterId]!.reason ?? t('chat.plan.isUnavailableToday'),
+                {t('chat.availBanner', {
+                  name: characters.find((c) => c.id === setup.characterId)?.name ?? '',
+                  reason: availability[setup.characterId]!.reason ?? t('chat.isUnavailableToday'),
                 })}
               </div>
             )}
             {outOfEnergy && (
               <div className="banner info" style={{ fontSize: '0.82rem' }}>
-                {t('chat.plan.outOfEnergy')}
+                {t('chat.outOfEnergy')}
               </div>
             )}
             <button
@@ -914,11 +1085,11 @@ export function Chat() {
               {starting ? (
                 <>
                   <span className="date-btn-spinner" aria-hidden="true" />
-                  {t('chat.plan.startingScene')}
+                  {t('chat.settingScene')}
                 </>
               ) : (
                 <>
-                  <Icon name="date" size={16} /> {t('chat.plan.begin')}
+                  <Icon name="date" size={16} /> {t('chat.begin')}
                 </>
               )}
             </button>
@@ -938,11 +1109,11 @@ export function Chat() {
   const locked = !!evalResult || !!walkout || leftEarly || !!dtrOutcome?.ended || brokeUp;
   const locationName = session.locationId
     ? session.locationId.startsWith('room:')
-      ? t('chat.venue.room', { name: character.name })
+      ? t('chat.loc.room', { name: character.name })
       : session.locationId.startsWith('prop:')
         ? setupProperties.find((pv) => `prop:${pv.property.id}` === session.locationId)?.property.name ?? t('chat.loc.yourPlace')
         : setupWorld?.locations.find((l) => l.id === session.locationId)?.name ?? t('chat.loc.somewhere')
-    : t('chat.venue.anywhere');
+    : t('chat.loc.anywhere');
   // The chosen venue's uploaded photo, if any — surfaced as a scene backdrop.
   const locationAssetId = session.locationId
     ? session.locationId.startsWith('prop:')
@@ -954,48 +1125,57 @@ export function Chat() {
   const locationImage = assetById(locationAssetId)?.path;
   const cal = scene ? deriveCalendar(scene.day) : null;
 
+  // The end-of-date evaluation note (mood, summary, memories) — or a safe-failure
+  // notice. Extracted so it can stand in as the primary moment OR ride along as a
+  // secondary note when a milestone/DTR moment takes the primary slot (going
+  // official otherwise hid the evaluation entirely).
+  const evalBanner = evalResult
+    ? evalResult.evaluated
+      ? (
+        <Banner kind="ok">
+          <strong>{t('chat.evalTitle')}</strong>{' '}
+          {t('chat.evalDetail', { mood: evalResult.mood, summary: evalResult.summaryLine, count: evalResult.memoriesWritten })}
+        </Banner>
+      )
+      : (
+        <Banner kind="error">
+          <strong>{t('chat.evalFailedTitle')}</strong>{t('chat.evalFailedBody', { error: evalResult.evalError })}
+        </Banner>
+      )
+    : null;
+
+  // When a milestone or accepted "define the relationship" moment is the headline,
+  // the evaluation note is shown below it rather than suppressed.
+  const milestoneTookPrimary = !!milestone || dtrOutcome?.decision === 'accept';
+
   // Compute the single most-important outcome to surface. Only one is shown at a time.
   const primaryOutcome = (() => {
     if (evalResult?.ending) {
       return (
         <div className="date-moment date-moment-ending">
           <div className="date-moment-seal" aria-hidden="true">✦</div>
-          <div className="date-moment-kicker">{t('chat.out.endingKicker')}</div>
-          <div className="date-moment-title">"{evalResult.ending.title}"</div>
+          <div className="date-moment-kicker">{t('chat.endingKicker')}</div>
+          <div className="date-moment-title">{t('chat.endingTitle', { title: evalResult.ending.title })}</div>
           <p className="date-moment-body">{evalResult.ending.epilogue}</p>
-          <p className="date-moment-note">{t('chat.out.endingNote')}</p>
+          <p className="date-moment-note">
+            {t('chat.endingNote')}
+          </p>
         </div>
       );
     }
-    if (evalResult?.breakup) {
-      return (
-        <div className="date-moment date-moment-breakup">
-          <div className="date-moment-seal" aria-hidden="true">💔</div>
-          <div className="date-moment-kicker">{t('chat.out.breakupKicker')}</div>
-          <div className="date-moment-title">{t('chat.out.brokeUpWithYou', { name: character.name })}</div>
-          <p className="date-moment-body">{evalResult.breakup.line}</p>
-          <p className="date-moment-note">{t('chat.out.breakupNote')}</p>
-        </div>
-      );
-    }
-    if (brokeUp) {
-      return (
-        <div className="date-moment date-moment-breakup">
-          <div className="date-moment-seal" aria-hidden="true">💔</div>
-          <div className="date-moment-kicker">{t('chat.out.youEndedKicker')}</div>
-          <div className="date-moment-title">{t('chat.out.youBrokeUp', { name: character.name })}</div>
-          <p className="date-moment-body">{t('chat.out.youBrokeUpBody')}</p>
-        </div>
-      );
-    }
+    // A walkout / lost-interest exit is the proximate thing that just happened on
+    // screen, so it stays the PRIMARY moment even when the full evaluation it now
+    // runs also ends the relationship — the breakup is surfaced as a consequence
+    // note below (see the secondary outcomes). Checked above evalResult.breakup so a
+    // walkout-induced breakup doesn't get re-skinned as an ordinary breakup card.
     if (walkout) {
       return (
         <div className="date-moment date-moment-walkout">
           <div className="date-moment-seal" aria-hidden="true">🚪</div>
-          <div className="date-moment-kicker">{t('chat.out.walkoutKicker')}</div>
-          <div className="date-moment-title">{t('chat.out.left', { name: character.name })}</div>
+          <div className="date-moment-kicker">{t('chat.walkoutKicker')}</div>
+          <div className="date-moment-title">{t('chat.walkoutTitle', { name: character.name })}</div>
           <p className="date-moment-body">{walkout}</p>
-          <p className="date-moment-note">{t('chat.out.walkoutNote')}</p>
+          <p className="date-moment-note">{t('chat.walkoutNote')}</p>
         </div>
       );
     }
@@ -1003,10 +1183,31 @@ export function Chat() {
       return (
         <div className="date-moment date-moment-walkout">
           <div className="date-moment-seal" aria-hidden="true">🌙</div>
-          <div className="date-moment-kicker">{t('chat.out.leftEarlyKicker')}</div>
-          <div className="date-moment-title">{t('chat.out.lostInterest', { name: character.name })}</div>
-          <p className="date-moment-body">{t('chat.out.leftEarlyBody')}</p>
-          <p className="date-moment-note">{t('chat.out.leftEarlyNote')}</p>
+          <div className="date-moment-kicker">{t('chat.leftEarlyKicker')}</div>
+          <div className="date-moment-title">{t('chat.leftEarlyTitle', { name: character.name })}</div>
+          <p className="date-moment-body">{t('chat.leftEarlyBody')}</p>
+          <p className="date-moment-note">{t('chat.leftEarlyNote')}</p>
+        </div>
+      );
+    }
+    if (evalResult?.breakup) {
+      return (
+        <div className="date-moment date-moment-breakup">
+          <div className="date-moment-seal" aria-hidden="true">💔</div>
+          <div className="date-moment-kicker">{t('chat.breakupKicker')}</div>
+          <div className="date-moment-title">{t('chat.breakupTitle', { name: character.name })}</div>
+          <p className="date-moment-body">{evalResult.breakup.line}</p>
+          <p className="date-moment-note">{t('chat.breakupNote')}</p>
+        </div>
+      );
+    }
+    if (brokeUp) {
+      return (
+        <div className="date-moment date-moment-breakup">
+          <div className="date-moment-seal" aria-hidden="true">💔</div>
+          <div className="date-moment-kicker">{t('chat.youEndedKicker')}</div>
+          <div className="date-moment-title">{t('chat.youEndedTitle', { name: character.name })}</div>
+          <p className="date-moment-body">{t('chat.youEndedBody')}</p>
         </div>
       );
     }
@@ -1014,8 +1215,8 @@ export function Chat() {
       return (
         <div className="date-moment date-moment-milestone">
           <div className="date-moment-seal" aria-hidden="true">✦</div>
-          <div className="date-moment-kicker">{t('chat.out.milestoneKicker')}</div>
-          <div className="date-moment-title">{t('chat.out.milestoneTitle', { label: milestone.label })}</div>
+          <div className="date-moment-kicker">{t('chat.milestoneKicker')}</div>
+          <div className="date-moment-title">{t('chat.milestoneTitle', { label: milestone.label })}</div>
           <p className="date-moment-body">{milestone.line}</p>
         </div>
       );
@@ -1025,8 +1226,8 @@ export function Chat() {
         return (
           <div className="date-moment date-moment-milestone">
             <div className="date-moment-seal" aria-hidden="true">✦</div>
-            <div className="date-moment-kicker">{t('chat.out.statusKicker')}</div>
-            <div className="date-moment-title">{t('chat.out.nowStatus', { status: statusLabel(t, dtrOutcome.status) })}</div>
+            <div className="date-moment-kicker">{t('chat.dtrConfirmedKicker')}</div>
+            <div className="date-moment-title">{t('chat.dtrConfirmedTitle', { status: relationshipStatusLabel(dtrOutcome.status) })}</div>
           </div>
         );
       }
@@ -1034,29 +1235,15 @@ export function Chat() {
         return (
           <div className="date-moment date-moment-walkout">
             <div className="date-moment-seal" aria-hidden="true">⚠</div>
-            <div className="date-moment-kicker">{t('chat.out.backfireKicker')}</div>
-            <div className="date-moment-title">{t('chat.out.backfireTitle')}</div>
-            {dtrOutcome.ended && <p className="date-moment-note">{t('chat.out.dateEnded')}</p>}
+            <div className="date-moment-kicker">{t('chat.dtrBackfireKicker')}</div>
+            <div className="date-moment-title">{t('chat.dtrBackfireTitle')}</div>
+            {dtrOutcome.ended && <p className="date-moment-note">{t('chat.dtrEnded')}</p>}
           </div>
         );
       }
-      return <Banner kind="info">{t('chat.out.notYet')}</Banner>;
+      return <Banner kind="info">{t('chat.dtrNotYet')}</Banner>;
     }
-    if (evalResult) {
-      if (evalResult.evaluated) {
-        return (
-          <Banner kind="ok">
-            <strong>{t('chat.out.evaluated')}</strong> {t('chat.out.evalMood', { mood: evalResult.mood ?? '' })} {evalResult.summaryLine}{' '}
-            {t(evalResult.memoriesWritten === 1 ? 'chat.out.memoriesOne' : 'chat.out.memoriesMany', { count: evalResult.memoriesWritten })}
-          </Banner>
-        );
-      }
-      return (
-        <Banner kind="error">
-          <strong>{t('chat.out.evalFailed')}</strong>{t('chat.out.evalFailedNote')}{evalResult.evalError}
-        </Banner>
-      );
-    }
+    if (evalResult) return evalBanner;
     return null;
   })();
 
@@ -1067,18 +1254,18 @@ export function Chat() {
       <div className="chat-wrap date-wrap">
         <aside className="chat-side date-dossier">
           <div className="framed bracketed date-plate">
-            <div className="kicker">{t('chat.companion')}</div>
+            <div className="kicker">{t('chat.yourCompanion')}</div>
             <div className="date-plate-portrait">
               <Portrait character={character} expression={expression} crossfade />
             </div>
             <div className="date-plate-name">{character.name}</div>
             <div className="date-plate-badges">
               {relationship && isBrokenUp(relationship) ? (
-                <span className="badge danger"><Icon name="breakup" size={12} /> {t('profile.badge.brokenUp')}</span>
+                <span className="badge danger"><Icon name="breakup" size={12} /> {t('chat.brokenUp')}</span>
               ) : (
                 <>
-                  {status !== 'none' && <span className="badge accent"><Icon name="date" size={12} /> {statusLabel(t, status)}</span>}
-                  {relationship && isOnTheRocks(relationship) && <span className="badge warn"><Icon name="warn" size={12} /> {t('profile.badge.onTheRocks')}</span>}
+                  {status !== 'none' && <span className="badge accent"><Icon name="date" size={12} /> {relationshipStatusLabel(status)}</span>}
+                  {relationship && isOnTheRocks(relationship) && <span className="badge warn"><Icon name="warn" size={12} /> {t('chat.onTheRocks')}</span>}
                 </>
               )}
               {expression && <span className="badge accent date-mood-chip">{expression}</span>}
@@ -1087,7 +1274,7 @@ export function Chat() {
           {relationship && (
             <div className={`card date-gauges ${milestone ? 'stage-up' : ''}`}>
               <div className="date-gauges-head">
-                <div className="kicker">{t('chat.whereStand')}</div>
+                <div className="kicker">{t('chat.whereYouStand')}</div>
                 <div className="trail" />
               </div>
               <RelationshipBars relationship={relationship} deltas={deltas ?? undefined} />
@@ -1104,15 +1291,15 @@ export function Chat() {
                 className="btn ghost block date-gift-btn"
                 onClick={() => (giftPicker ? setGiftPicker(false) : void openGiftPicker())}
                 disabled={busy || streaming.active}
-                title={t('chat.gift.title')}
+                title={t('chat.giveSomething')}
               >
-                <Icon name="gift" size={15} /> {giftPicker ? t('common.nevermind') : t('chat.gift.give')}
+                <Icon name="gift" size={15} /> {giftPicker ? t('chat.neverMind') : t('chat.giveGift')}
               </button>
             )}
             {giftPicker && !locked && (
               <div className="date-gift-picker">
                 {giftItems.length === 0 ? (
-                  <p className="muted date-gift-empty">{t('chat.gift.empty')}</p>
+                  <p className="muted date-gift-empty">{t('chat.giftEmpty')}</p>
                 ) : (
                   giftItems.map((e) => (
                     <button
@@ -1160,10 +1347,10 @@ export function Chat() {
               </div>
             )}
             {scene && cal && (
-              <span className="date-scene-lead" title={`${dayLabel(t, cal.dayOfWeek)}, ${seasonLabel(t, cal.season)}`}>
+              <span className="date-scene-lead" title={t('chat.sceneLeadTitle', { weekday: weekdayLabel(cal.dayOfWeek), season: seasonLabel(cal.season) })}>
                 <span className="ph">{PHASE_ICONS[scene.phase]}</span>
                 <span className="day">
-                  {t('dash.hud.day', { day: scene.day })} · <span className="ph-label">{phaseLabel(t, scene.phase)}</span>
+                  {t('chat.sceneDay', { day: scene.day })}<span className="ph-label">{phaseLabel(scene.phase)}</span>
                 </span>
               </span>
             )}
@@ -1177,12 +1364,12 @@ export function Chat() {
             )}
             {scene?.mood && (
               <span className="date-chip">
-                <span className="ico">{scene.moodIcon}</span> {t('chat.scene.seems', { name: character.name, mood: scene.mood ?? '' })}
+                <span className="ico">{scene.moodIcon}</span> {t('chat.seems', { name: character.name, mood: scene.mood })}
               </span>
             )}
           </div>
           {!locked && (
-            <DateTrajectory value={rapport ?? 50} label={vibe ?? 'settling in'} pulse={rapportPulse} />
+            <DateTrajectory value={rapport ?? 50} label={vibe ?? t('chat.settlingIn')} pulse={rapportPulse} />
           )}
           <div className="messages date-reel">
             {messages.length === 0 && !streaming.active && (
@@ -1194,17 +1381,25 @@ export function Chat() {
                   <div className="date-opening-name">{character.name}</div>
                   <p className="date-opening-scene">
                     {scene?.mood
-                      ? `${t('chat.opening.mood', { name: character.name, mood: scene.mood })}${session.locationId ? t('chat.opening.atLoc', { loc: locationName }) : ''}${scene.weatherLabel ? t('chat.opening.weather', { weather: scene.weatherLabel.toLowerCase() }) : ''}`
-                      : session.locationId
-                        ? t('chat.opening.waitingAt', { name: character.name, loc: locationName })
-                        : t('chat.opening.hereWaiting', { name: character.name })}
+                      ? t('chat.openingWithMood', {
+                          name: character.name,
+                          mood: scene.mood,
+                          atLocation: locationName !== t('chat.loc.anywhere') ? t('chat.openingAtLocation', { location: locationName }) : '',
+                          weather: scene.weatherLabel ? t('chat.openingWeather', { weather: scene.weatherLabel.toLowerCase() }) : '',
+                        })
+                      : locationName !== t('chat.loc.anywhere')
+                        ? t('chat.openingWaitingAt', { name: character.name, location: locationName })
+                        : t('chat.openingWaiting', { name: character.name })}
                   </p>
-                  <div className="date-opening-cue">{t('chat.opening.cue')}</div>
+                  <div className="date-opening-cue">{t('chat.sayHello')}</div>
                 </div>
               </div>
             )}
             {messages.map((m) => (
-              <div key={m.id} className={`date-msg ${m.role}`}>
+              <div
+                key={m.id}
+                className={`date-msg ${m.role}${m.role === 'narrator' && m.metadata?.venueFlavor === true ? ' venue-flavor' : ''}`}
+              >
                 {m.text}
               </div>
             ))}
@@ -1216,7 +1411,7 @@ export function Chat() {
                     <span className="date-cursor" />
                   </>
                 ) : (
-                  <span className="date-typing" aria-label={t('chat.typing')}>
+                  <span className="date-typing" aria-label="typing">
                     <span />
                     <span />
                     <span />
@@ -1232,18 +1427,37 @@ export function Chat() {
           {primaryOutcome}
 
           {/* Secondary outcomes — quiet notes below the primary moment */}
+          {milestoneTookPrimary && evalBanner}
+          {(walkout || leftEarly) && evalResult?.breakup && (
+            <Banner kind="error">
+              <Icon name="breakup" size={14} /> <strong>{t('chat.breakupTitle', { name: character.name })}</strong>{' '}
+              {evalResult.breakup.line}
+            </Banner>
+          )}
           {evalResult?.reconciled && (
             <Banner kind="ok">
-              <Icon name="date" size={14} /> <strong>{t('chat.sec.reconciledStrong', { name: character.name })}</strong>{t('chat.sec.reconciledNote')}
+              <Icon name="date" size={14} /> <strong>{t('chat.backTogether', { name: character.name })}</strong> {t('chat.backTogetherNote')}
             </Banner>
           )}
           {evalResult?.onTheRocks && !evalResult.breakup && (
             <Banner kind="info">
-              <Icon name="warn" size={14} /> <strong>{t('chat.sec.rocksStrong')}</strong>{t('chat.sec.rocksNote')}
+              <Icon name="warn" size={14} /> <strong>{t('chat.rocksTitle')}</strong> {t('chat.rocksNote')}
             </Banner>
           )}
           {evalResult?.jealousy?.triggered && (
             <Banner kind="error"><Icon name="breakup" size={14} /> {evalResult.jealousy.message}</Banner>
+          )}
+
+          {failed && !locked && !breakupPending && (
+            <div className="date-retry" role="alert">
+              <span className="date-retry-msg">
+                <Icon name="warn" size={14} />
+                {failed.kind === 'reply' ? t('chat.replyFailed') : t('chat.sendFailed')}
+              </span>
+              <button className="btn sm date-retry-btn" onClick={() => void retry()} disabled={streaming.active || busy}>
+                <Icon name="refresh" size={14} /> {streaming.active ? t('chat.retrying') : t('chat.retry')}
+              </button>
+            </div>
           )}
 
           {locked ? (
@@ -1254,21 +1468,23 @@ export function Chat() {
             </div>
           ) : breakupPending ? (
             <div className="date-breakup">
-              <div className="date-breakup-title"><Icon name="breakup" size={16} /> {t('chat.breakup.title', { name: character.name })}</div>
-              <p>{t('chat.breakup.body', { name: character.name })}</p>
+              <div className="date-breakup-title"><Icon name="breakup" size={16} /> {t('chat.breakupConfirmTitle', { name: character.name })}</div>
+              <p>
+                {t('chat.breakupConfirmBody', { name: character.name })}
+              </p>
               <div className="row">
                 <button className="btn danger" onClick={confirmBreakup} disabled={busy}>
-                  {busy ? t('chat.breakup.ending') : <><Icon name="breakup" size={14} /> {t('chat.breakup.confirm')}</>}
+                  {busy ? t('chat.ending') : <><Icon name="breakup" size={14} /> {t('chat.confirmBreakup')}</>}
                 </button>
                 <button className="btn ghost" onClick={cancelBreakup} disabled={busy}>
-                  {t('common.nevermind')}
+                  {t('chat.neverMind')}
                 </button>
               </div>
             </div>
           ) : (
             <div className="date-input-wrap">
               {relationship && (
-                <div className="intent-chips" role="group" aria-label={t('chat.intentAria')}>
+                <div className="intent-chips" role="group" aria-label={t('chat.intentComing')}>
                   {availableIntents(relationship).map((opt) => (
                     <button
                       key={opt}
@@ -1279,7 +1495,7 @@ export function Chat() {
                       onClick={() => setIntent((cur) => (cur === opt ? null : opt))}
                     >
                       <span className="intent-chip-emoji">{INTENT_ICONS[opt]}</span>
-                      {intentLabel(t, opt)}
+                      {intentLabel(opt)}
                     </button>
                   ))}
                 </div>
@@ -1287,7 +1503,7 @@ export function Chat() {
               <div className="chat-input date-composer">
                 <textarea
                   value={input}
-                  placeholder={intent ? t('chat.composer.withIntent', { intent: intentLabel(t, intent), name: character.name }) : t('chat.composer.message', { name: character.name })}
+                  placeholder={intent ? t('chat.composerIntent', { intent: intentLabel(intent), name: character.name }) : t('chat.composerPlain', { name: character.name })}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1296,7 +1512,7 @@ export function Chat() {
                     }
                   }}
                 />
-                <button className="btn primary date-send" onClick={send} disabled={streaming.active || !input.trim()}>
+                <button className="btn primary date-send" onClick={() => void send()} disabled={streaming.active || !input.trim()}>
                   <Icon name="send" size={15} />
                 </button>
               </div>

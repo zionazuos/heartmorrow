@@ -71,6 +71,10 @@
   --rim: inset 0 1px 0 rgba(243, 236, 221, 0.05);
   --glow-warm: 0 0 26px rgba(230, 177, 94, 0.32);
   --glow-rose: 0 0 24px rgba(232, 138, 166, 0.34);
+  /* Glow keyed to the user's accent (defaults to brass, so the default look is
+     unchanged). Re-resolves wherever it's used because --accent-2 is set on
+     <html> by the theme. */
+  --glow-accent: 0 0 24px color-mix(in oklab, var(--accent-2) 42%, transparent);
   --gap: 16px;
   --nav-w: 256px;
   --maxw: 1320px;
@@ -105,6 +109,12 @@ html, body, #root { height: 100%; margin: 0; }
 html, body { overflow-x: hidden; }
 body {
   background:
+    /* The accent ambient bloom — a soft pool of the user's chosen tint that
+       breathes behind every screen. Defaults to brass (so the stock look is
+       unchanged); pick another accent and the whole app's mood lighting shifts.
+       Two pools (top-right warm side, bottom-left cool side) echo the halos. */
+    radial-gradient(960px 620px at 88% -10%, color-mix(in oklab, var(--accent-2) 20%, transparent), transparent 60%),
+    radial-gradient(880px 600px at 6% 108%, color-mix(in oklab, var(--accent) 15%, transparent), transparent 60%),
     radial-gradient(820px 520px at var(--halo-pos-1), var(--halo-1), transparent 60%),
     radial-gradient(760px 520px at var(--halo-pos-2), var(--halo-2), transparent 58%),
     var(--ink);
@@ -133,7 +143,7 @@ code { font-family: var(--font-mono); font-size: 0.86em; color: var(--moon); }
 
 /* Visible keyboard focus everywhere (accessibility floor). */
 :focus-visible { outline: 2px solid var(--moon); outline-offset: 2px; }
-.btn:focus-visible, .phone-icon:focus-visible { outline-color: var(--brass); }
+.btn:focus-visible, .phone-icon:focus-visible { outline-color: var(--accent-2); }
 
 /* ===========================================================================
    BOLD VOCABULARY — the game-UI primitives every page draws from.
@@ -292,7 +302,7 @@ code { font-family: var(--font-mono); font-size: 0.86em; color: var(--moon); }
 .bottomnav a.active .ico { opacity: 1; }
 .bottomnav a.active::before {
   content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 22px; height: 3px; border-radius: 999px; background: var(--brass); box-shadow: var(--glow-warm);
+  width: 22px; height: 3px; border-radius: 999px; background: var(--accent-2); box-shadow: var(--glow-accent);
 }
 /* Items flex evenly now (no min-width floor), so these only tighten padding and
    shrink the label so it stays legible as the cells get narrower. */
@@ -342,13 +352,61 @@ code { font-family: var(--font-mono); font-size: 0.86em; color: var(--moon); }
   .sidebar a .ico { width: 22px; text-align: center; font-size: 1.05rem; opacity: 0.8; }
   .sidebar a:hover { background: var(--panel); color: var(--text); }
   .sidebar a.active {
-    background: linear-gradient(135deg, rgba(230, 177, 94, 0.16), rgba(232, 138, 166, 0.12));
+    background: linear-gradient(135deg,
+      color-mix(in oklab, var(--accent-2) 18%, transparent),
+      color-mix(in oklab, var(--accent) 13%, transparent));
     color: var(--text);
-    box-shadow: inset 3px 0 0 var(--brass), inset 0 0 0 1px rgba(230, 177, 94, 0.2);
+    box-shadow: inset 3px 0 0 var(--accent-2),
+      inset 0 0 0 1px color-mix(in oklab, var(--accent-2) 22%, transparent);
   }
   .sidebar a.active .ico { opacity: 1; }
   .sidebar .money-pill { margin-top: auto; align-self: stretch; justify-content: center; }
   .app-main { padding: 34px 38px 56px; }
+
+  /* Pinned footer: a lit doorway out to the Discord + the build stamp. */
+  .sidebar-foot {
+    margin-top: auto;
+    flex-shrink: 0;
+    padding-top: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .sidebar-foot .support-link {
+    display: flex; align-items: center; gap: 11px;
+    padding: 9px 11px; border-radius: var(--radius-sm);
+    color: var(--text-dim); font-weight: 600;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .sidebar-foot .support-link .ico {
+    width: 22px; text-align: center; opacity: 0.9; flex-shrink: 0;
+  }
+  .sidebar-foot .support-link:hover { color: var(--text); }
+  .sidebar-foot .support-link:hover .ico { opacity: 1; }
+  /* Per-brand accent: Discord blurple, GitHub a warm parchment-neutral. */
+  .sidebar-foot .discord-link .ico { color: #8b9bff; }
+  .sidebar-foot .discord-link:hover {
+    background: color-mix(in oklab, #5865f2 16%, transparent);
+    border-color: color-mix(in oklab, #5865f2 34%, transparent);
+  }
+  .sidebar-foot .github-link .ico { color: var(--text); opacity: 0.78; }
+  .sidebar-foot .github-link:hover {
+    background: color-mix(in oklab, var(--text) 10%, transparent);
+    border-color: color-mix(in oklab, var(--text) 22%, transparent);
+  }
+  .sidebar-foot .support-link-text {
+    display: flex; flex-direction: column; line-height: 1.2; min-width: 0;
+    font-size: 0.9rem;
+  }
+  .sidebar-foot .support-link-text small {
+    font-weight: 500; font-size: 0.72rem; color: var(--text-dim); opacity: 0.78;
+  }
+  .app-version {
+    padding: 0 4px;
+    font-size: 0.72rem; color: var(--text-dim); opacity: 0.6;
+    letter-spacing: 0.01em;
+  }
+  .app-version .commit { font-variant-numeric: tabular-nums; opacity: 0.85; }
 }
 
 /* Right after the sidebar appears (860–1023px) the content column is at its
@@ -493,11 +551,11 @@ input, textarea, select {
 input::placeholder, textarea::placeholder { color: var(--text-mute); }
 input[type="checkbox"], input[type="radio"] {
   width: 16px; height: 16px; flex: none; padding: 0; margin: 0;
-  accent-color: var(--brass); cursor: pointer;
+  accent-color: var(--accent-2); cursor: pointer;
 }
 input:focus, textarea:focus, select:focus {
-  outline: none; border-color: var(--brass);
-  box-shadow: 0 0 0 3px rgba(230, 177, 94, 0.2);
+  outline: none; border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-2) 24%, transparent);
 }
 textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 .inline-fields { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
@@ -631,7 +689,10 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
    only when genuinely too long — so short names ("Messages") never clip while the
    side action/back buttons are always protected. */
 .pbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-.pbar-side { display: flex; align-items: center; min-width: 0; }
+/* Both side slots reserve an equal min width so a bar with only one button (a lone
+   Back or a lone action) still renders its title optically centered, not shoved
+   toward the empty side. */
+.pbar-side { display: flex; align-items: center; min-width: 38px; }
 .pbar-right { justify-content: flex-end; }
 .pbar-title { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
 .pbar-kicker {
@@ -871,15 +932,83 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 @media (min-width: 2000px) {
   .phone-device { max-width: 880px; height: min(90vh, 1180px); height: min(90dvh, 1180px); }
 }
+/* Thin / small screens: drop the device frame entirely — no bezel, border, rounded
+   corners, centered island or vh height cap — so the phone goes full-bleed and the
+   content (plus the status bar and home button) uses every pixel down to the nav. */
+@media (max-width: 540px) {
+  /* A definite viewport height (not just min-height) so the flex chain below has a
+     concrete height to fill — otherwise app-main/phone-wrap size to content and
+     leave dead space above the bottom nav. */
+  .app[data-route='phone'] {
+    height: 100vh;
+    height: 100dvh;
+  }
+  /* No padding-bottom reserve: the bottom nav is in normal flow (.app > .bottomnav is
+     position: relative), so it already takes its own space below app-main. Reserving
+     the nav's height here just left a dead 56px strip that exposed the route's
+     atmosphere grid between the phone and the nav. */
+  .app[data-route='phone'] .app-main {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .app[data-route='phone'] .phone-wrap {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    /* Column so the device grows along the main axis to fill the wrap — relying on
+       cross-axis stretch left the device at content height, exposing the route's
+       atmosphere grid in the gap above the bottom nav. */
+    flex-direction: column;
+  }
+  .app[data-route='phone'] .phone-device {
+    max-width: none;
+    width: 100%;
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
 .phone-statusbar {
   display: flex; justify-content: space-between; align-items: center;
   padding: 11px 24px 6px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-dim); flex-shrink: 0;
 }
-.phone-screen { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.phone-screen { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* Ambient lamplight that breathes with the in-world hour & season — the phone's
+   signature, now carried INSIDE the device (home + every app), not just the page
+   margins. --halo-1/--halo-2 are already re-tinted per data-phase/data-season on
+   <html>, so this warms toward dusk and cools toward winter for free. The appbar
+   and cards paint over it; it glows through the gutters between them. */
+.phone-screen::before {
+  content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(125% 80% at 86% -10%, var(--halo-1), transparent 60%),
+    radial-gradient(115% 75% at -10% 110%, var(--halo-2), transparent 60%);
+  animation: phone-breathe 15s ease-in-out infinite;
+}
+.phone-home, .ph-dock, .phone-appwrap { position: relative; z-index: 1; }
+@keyframes phone-breathe {
+  0%, 100% { opacity: 0.62; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .phone-screen::before { animation: none; opacity: 0.82; }
+}
 .phone-home {
   flex: 1; height: 0; overflow-y: auto; padding: 20px 18px;
   background-image: var(--phone-wallpaper, none);
-  background-size: cover; background-position: center;
+  /* Scaling is driven by the user's chosen fit mode (Settings → wallpaper). The
+     default `contain` shows the WHOLE image — an extremely wide/tall photo would
+     otherwise be zoomed until only an unrecognizable sliver is visible. Letterbox
+     gaps fall back to the dark phone-screen behind, and the .has-wallpaper scrim
+     (a gradient, which always fills regardless of background-size) keeps text legible. */
+  background-size: var(--phone-wallpaper-size, contain);
+  background-position: var(--phone-wallpaper-position, center);
+  background-repeat: var(--phone-wallpaper-repeat, no-repeat);
 }
 .phone-home::before { content: none; }
 /* A user wallpaper can be any image — light, busy, low-contrast — which buries
@@ -923,9 +1052,20 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 .phone-appwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .phone-app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .phone-appbar {
+  position: relative;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 11px 15px; border-bottom: 1px solid var(--border-soft); flex-shrink: 0;
-  background: var(--ink-2); box-shadow: 0 1px 0 rgba(230, 177, 94, 0.1);
+  /* A faint lamplight bloom behind the title (phase-tinted via --halo-1) lifts the
+     bar out of flatness without competing with the user's accent. */
+  background:
+    radial-gradient(72% 150% at 50% -54%, var(--halo-1), transparent 72%),
+    var(--ink-2);
+}
+/* The quiet signature: a brass hairline that fades at both ends, echoing .rule. */
+.phone-appbar::after {
+  content: ''; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--brass-dim), transparent);
+  pointer-events: none;
 }
 .phone-appbar strong { font-family: var(--font-display); font-weight: 600; font-size: 1.02rem; }
 .phone-appbar h2, .phone-appbar h3 { margin: 0; }
@@ -1162,6 +1302,51 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
   width: 56vw; height: 56vw; border-radius: 50%;
   background: radial-gradient(circle, rgba(255, 201, 150, 0.08), transparent 62%);
 }
+/* --- Crash screen (top-level error boundary) ----------------------------- */
+/* Lives in styles.css (always loaded) so it renders even if a page-CSS chunk or
+   the i18n runtime is what failed. */
+.crash {
+  position: fixed; inset: 0; z-index: 1000; overflow: auto;
+  display: flex; align-items: center; justify-content: center;
+  padding: clamp(18px, 5vw, 48px); background: var(--ink, #0a0c18);
+}
+.crash-atmosphere {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 50% -5%, color-mix(in oklab, var(--ember, #e07a82) 16%, transparent), transparent 70%),
+    radial-gradient(50% 45% at 12% 110%, color-mix(in oklab, var(--brass, #e6b15e) 10%, transparent), transparent 70%);
+}
+.crash-card {
+  position: relative; z-index: 1; width: 100%; max-width: 540px;
+  text-align: center; padding: clamp(24px, 5vw, 36px) clamp(20px, 4vw, 32px);
+}
+.crash-mark {
+  width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: 1.9rem; font-weight: 700; line-height: 1;
+  color: var(--ember); border: 1px solid color-mix(in oklab, var(--ember) 45%, var(--border));
+  background: radial-gradient(circle at 50% 35%, color-mix(in oklab, var(--ember) 24%, transparent), transparent 70%);
+}
+.crash-title { margin: 4px 0 14px; }
+.crash-lede { color: var(--text-dim); margin: 0 auto 12px; max-width: 46ch; }
+.crash-actions {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 22px 0 12px;
+}
+.crash-actions .btn { gap: 8px; }
+.crash-brand { width: 16px; height: 16px; flex: none; }
+.crash-reload { margin-top: 4px; }
+.crash-details { margin-top: 22px; text-align: left; }
+.crash-details summary {
+  cursor: pointer; font-family: var(--font-mono); font-size: 0.7rem;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-mute);
+}
+.crash-pre {
+  margin-top: 10px; max-height: 220px; overflow: auto; padding: 12px;
+  border-radius: var(--radius-sm); background: var(--ink-2, #0b0e1c);
+  border: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.74rem;
+  line-height: 1.5; color: var(--text-dim); white-space: pre-wrap; word-break: break-word;
+}
+
 @keyframes atm-rain { to { transform: translateY(38px); } }
 @keyframes atm-snow { to { transform: translateY(240px); } }
 @keyframes atm-drift { from { transform: translateX(-3%); } to { transform: translateX(3%); } }

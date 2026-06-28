@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS players (
   pronouns     TEXT NOT NULL DEFAULT 'they/them',
   persona_notes TEXT NOT NULL DEFAULT '',
   money        INTEGER NOT NULL DEFAULT 0,
+  career       TEXT NOT NULL DEFAULT '{}',
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL
 );
@@ -327,6 +328,9 @@ CREATE TABLE IF NOT EXISTS npc_edges (
   meet_count INTEGER NOT NULL DEFAULT 0,
   last_day   INTEGER NOT NULL DEFAULT 0,
   promoted   INTEGER NOT NULL DEFAULT 0,
+  romance_state TEXT NOT NULL DEFAULT 'none',
+  romance_since INTEGER NOT NULL DEFAULT 0,
+  soured     INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (world_id, a_id, b_id)
 );
 CREATE INDEX IF NOT EXISTS idx_npc_edges_world ON npc_edges(world_id);
@@ -514,6 +518,36 @@ CREATE TABLE IF NOT EXISTS session_rapport (
   rapport    INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- Heartmorrow Bench: saved model-evaluation runs. The full BenchRunSummary lives
+-- in the data column (JSON); the top columns are denormalized for cheap list ordering.
+CREATE TABLE IF NOT EXISTS bench_runs (
+  id         TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  label      TEXT NOT NULL DEFAULT '',
+  model      TEXT NOT NULL DEFAULT '',
+  data       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bench_runs_created ON bench_runs(created_at);
+
+-- Heartmorrow Bench: the human baselines for the scoring judges, keyed by case id
+-- and persisted independently of any run so they're reused across runs.
+CREATE TABLE IF NOT EXISTS bench_baselines (
+  case_id    TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  note       TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+
+-- Prompt Editor: installation-LOCAL overrides for the system prompts / guardrails,
+-- keyed by the registry prompt id. Global (never per-world / per-character) and
+-- deliberately NOT exported with worlds/characters, so a custom prompt set stays on
+-- this machine. A missing row means "use the shipped default".
+CREATE TABLE IF NOT EXISTS prompt_overrides (
+  prompt_id     TEXT PRIMARY KEY,
+  override_text TEXT NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
 `;
 
 /**
@@ -656,6 +690,25 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; ddl: stri
     column: 'sexuality',
     ddl: `ALTER TABLE characters ADD COLUMN sexuality TEXT NOT NULL DEFAULT 'unspecified'`,
   },
+  // Emergent NPC romance: a world-sim NPC↔NPC edge can grow a crush → couple. Default
+  // 'none'/0 so every legacy edge decodes to an unattached pair (unchanged behavior).
+  {
+    table: 'npc_edges',
+    column: 'romance_state',
+    ddl: `ALTER TABLE npc_edges ADD COLUMN romance_state TEXT NOT NULL DEFAULT 'none'`,
+  },
+  {
+    table: 'npc_edges',
+    column: 'romance_since',
+    ddl: `ALTER TABLE npc_edges ADD COLUMN romance_since INTEGER NOT NULL DEFAULT 0`,
+  },
+  {
+    // Emergent fallings-out: a world-sim NPC↔NPC edge can sour into a rivalry. Default 0
+    // so every legacy edge decodes as un-soured (unchanged behavior).
+    table: 'npc_edges',
+    column: 'soured',
+    ddl: `ALTER TABLE npc_edges ADD COLUMN soured INTEGER NOT NULL DEFAULT 0`,
+  },
   {
     table: 'players',
     column: 'gender',
@@ -665,6 +718,11 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; ddl: stri
     table: 'players',
     column: 'sexuality',
     ddl: `ALTER TABLE players ADD COLUMN sexuality TEXT NOT NULL DEFAULT 'unspecified'`,
+  },
+  {
+    table: 'players',
+    column: 'career',
+    ddl: `ALTER TABLE players ADD COLUMN career TEXT NOT NULL DEFAULT '{}'`,
   },
   {
     // Player-sent photo on a text (uploaded asset id; vision model reads it).

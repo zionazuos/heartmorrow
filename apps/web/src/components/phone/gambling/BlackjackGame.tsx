@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react';
+import type { ParseKeys } from 'i18next';
+import { useTranslation } from 'react-i18next';
 import type { BlackjackView } from '@dsim/shared';
 import { api } from '../../../lib/api';
 import { errorMessage } from '../../../lib/hooks';
-import { useT } from '../../../i18n';
-import type { MessageKey } from '../../../i18n/locales/en';
 import { Banner } from '../../ui';
-import { PlayingCard, BetStepper, ResultBanner, clampBet, maxAffordable, type CasinoGameProps } from './shared';
+import { PlayingCard, BetStepper, CantBetNote, ResultBanner, clampBet, maxAffordable, type CasinoGameProps } from './shared';
 import './blackjack.css';
 
 type Props = CasinoGameProps & { resume?: BlackjackView | null };
 
-const RESULT_TITLE_KEY: Record<NonNullable<BlackjackView['outcome']>, MessageKey> = {
-  blackjack: 'gmb.bj.blackjack',
-  win: 'gmb.bj.win',
-  push: 'gmb.bj.push',
-  lose: 'gmb.bj.lose',
+const RESULT_TITLE_KEY: Record<NonNullable<BlackjackView['outcome']>, ParseKeys<'phone'>> = {
+  blackjack: 'gambling.bjBlackjack',
+  win: 'gambling.bjWin',
+  push: 'gambling.bjPush',
+  lose: 'gambling.bjLose',
 };
 
 export function BlackjackGame({ worldId, wallet, onSettled, resume }: Props) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const [hand, setHand] = useState<BlackjackView | null>(resume ?? null);
   const [bet, setBet] = useState(() => clampBet(25, wallet));
   const [busy, setBusy] = useState(false);
@@ -58,7 +58,7 @@ export function BlackjackGame({ worldId, wallet, onSettled, resume }: Props) {
   const playing = hand?.phase === 'player';
   const resultOutcome = hand?.outcome === 'blackjack' ? 'win' : (hand?.outcome ?? 'lose');
   const resultTitle =
-    hand?.outcome === 'lose' && hand.playerTotal > 21 ? t('gmb.bj.bust') : hand?.outcome ? t(RESULT_TITLE_KEY[hand.outcome]) : '';
+    hand?.outcome === 'lose' && hand.playerTotal > 21 ? t('gambling.bust') : hand?.outcome ? t(RESULT_TITLE_KEY[hand.outcome]) : '';
 
   return (
     <div className="bj">
@@ -66,7 +66,7 @@ export function BlackjackGame({ worldId, wallet, onSettled, resume }: Props) {
         {/* Dealer */}
         <div className="bj-side">
           <div className="bj-tag">
-            {t('gmb.bj.dealer')} <span className="bj-total">{hand && hand.dealerTotal != null ? hand.dealerTotal : hand ? '?' : '—'}</span>
+            {t('gambling.dealer')} <span className="bj-total">{hand && hand.dealerTotal != null ? hand.dealerTotal : hand ? '?' : '—'}</span>
           </div>
           <div className="gmb-hand">
             {hand ? (
@@ -96,9 +96,9 @@ export function BlackjackGame({ worldId, wallet, onSettled, resume }: Props) {
             )}
           </div>
           <div className="bj-tag">
-            {t('gmb.bj.you')}{' '}
+            {t('gambling.you')}{' '}
             <span className={`bj-total${hand && hand.playerTotal > 21 ? ' bust' : ''}`}>
-              {hand ? `${hand.playerTotal}${hand.playerSoft && hand.playerTotal <= 21 ? t('gmb.bj.soft') : ''}` : '—'}
+              {hand ? `${hand.playerTotal}${hand.playerSoft && hand.playerTotal <= 21 ? t('gambling.soft') : ''}` : '—'}
             </span>
           </div>
         </div>
@@ -110,13 +110,13 @@ export function BlackjackGame({ worldId, wallet, onSettled, resume }: Props) {
       {/* Controls */}
       {!hand || done ? (
         !canBet ? (
-          <div className="gmb-muted">{t('gmb.limitReached')}</div>
+          <CantBetNote wallet={wallet} />
         ) : (
           <>
             <BetStepper wallet={wallet} value={bet} onChange={setBet} disabled={busy} />
             <div className="gmb-actions">
               <button className="gmb-go" onClick={deal} disabled={busy}>
-                {busy ? t('gmb.dealing') : done ? t('gmb.dealAgain', { bet }) : t('gmb.deal', { bet })}
+                {busy ? t('gambling.dealing') : done ? t('gambling.dealAgain', { bet }) : t('gambling.deal', { bet })}
               </button>
             </div>
           </>
@@ -124,13 +124,13 @@ export function BlackjackGame({ worldId, wallet, onSettled, resume }: Props) {
       ) : (
         <div className="gmb-actions">
           <button className="gmb-go" onClick={() => act('hit')} disabled={busy || !hand?.canHit}>
-            {t('gmb.bj.hit')}
+            {t('gambling.hit')}
           </button>
           <button className="gmb-go" onClick={() => act('stand')} disabled={busy || !hand?.canStand}>
-            {t('gmb.bj.stand')}
+            {t('gambling.stand')}
           </button>
           <button className="gmb-go alt" onClick={() => act('double')} disabled={busy || !hand?.canDouble}>
-            {t('gmb.bj.double')}
+            {t('gambling.double')}
           </button>
         </div>
       )}

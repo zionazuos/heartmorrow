@@ -8,11 +8,11 @@ import {
   type SlotSymbol,
   type SlotsResult,
 } from '@dsim/shared';
+import { useTranslation } from 'react-i18next';
 import { api } from '../../../lib/api';
 import { errorMessage } from '../../../lib/hooks';
-import { useT } from '../../../i18n';
 import { Banner } from '../../ui';
-import { BetStepper, ResultBanner, clampBet, maxAffordable, type CasinoGameProps } from './shared';
+import { BetStepper, CantBetNote, ResultBanner, clampBet, maxAffordable, type CasinoGameProps } from './shared';
 import './slots.css';
 
 const CELL = 60; // px per reel cell — must match .slot-cell height
@@ -35,7 +35,7 @@ const PAY_ROWS = (Object.keys(SLOT_TRIPLE_PAYOUT) as SlotSymbol[]).sort(
 );
 
 export function SlotsGame({ worldId, wallet, onSettled }: CasinoGameProps) {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const [bet, setBet] = useState(() => clampBet(25, wallet));
   const [strips, setStrips] = useState<SlotSymbol[][]>([
     ['bar', 'seven', 'bell'],
@@ -101,7 +101,7 @@ export function SlotsGame({ worldId, wallet, onSettled }: CasinoGameProps) {
   return (
     <div className="slot-machine">
       <div className="gmb-table">
-        <div className="gmb-felt-label">{t('gmb.slots.felt')}</div>
+        <div className="gmb-felt-label">{t('gambling.slotsFelt')}</div>
         <div className={`slot-window${won ? ' win' : ''}`}>
           <div className="slot-payline" />
           <div className="slot-reels">
@@ -123,9 +123,9 @@ export function SlotsGame({ worldId, wallet, onSettled }: CasinoGameProps) {
       {error && <Banner kind="error">{error}</Banner>}
       {result &&
         (won ? (
-          <ResultBanner outcome="win" title={result.line ?? t('gmb.winner')} net={result.net} />
+          <ResultBanner outcome="win" title={result.line ?? t('gambling.winner')} net={result.net} />
         ) : (
-          <ResultBanner outcome="lose" title={t('gmb.slots.noLine')} net={result.net} />
+          <ResultBanner outcome="lose" title={t('gambling.noLine')} net={result.net} />
         ))}
 
       <div className="slot-paytable">
@@ -143,20 +143,20 @@ export function SlotsGame({ worldId, wallet, onSettled }: CasinoGameProps) {
           <span className="slot-paysyms">
             <span className="slot-sym sym-cherry">{SLOT_SYMBOL_GLYPH.cherry}</span>
             <span className="slot-sym sym-cherry">{SLOT_SYMBOL_GLYPH.cherry}</span>
-            <span className="slot-pay-any">{t('gmb.slots.plusAny')}</span>
+            <span className="slot-pay-any">+ any</span>
           </span>
           <span className="slot-paymult">{SLOT_CHERRY_TWO_PAYOUT}×</span>
         </div>
       </div>
 
       {!canBet ? (
-        <div className="gmb-muted">{t('gmb.limitReached')}</div>
+        <CantBetNote wallet={wallet} />
       ) : (
         <BetStepper wallet={wallet} value={bet} onChange={setBet} disabled={busy} />
       )}
       <div className="gmb-actions">
         <button className="gmb-go" onClick={spin} disabled={busy || !canBet}>
-          {busy ? t('gmb.spinning') : t('gmb.slots.spin', { bet })}
+          {busy ? t('gambling.spinning') : t('gambling.spinBet', { bet })}
         </button>
       </div>
     </div>

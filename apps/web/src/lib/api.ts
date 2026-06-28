@@ -6,8 +6,10 @@ import type {
   CharacterEnding,
   CharacterBundle,
   CharacterCreate,
+  CharacterDossier,
   CharacterMemory,
   CharacterUpdate,
+  ConstellationView,
   DatingStats,
   Email,
   Intent,
@@ -16,8 +18,11 @@ import type {
   FeedView,
   GenerateDatingStatsInput,
   GenerateLocationsInput,
+  GenerateWorldInput,
+  WorldGenDraft,
   GenerateProfileInput,
   GenerateCharacterFromImageInput,
+  GenerateCharacterFromSourcesInput,
   GenerateShopItemsInput,
   CharacterTemplateDraft,
   ProfileGeneration,
@@ -29,6 +34,7 @@ import type {
   PhoneThreadSummary,
   StructuredResult,
   TextMessage,
+  TogetherResult,
   ActiveDate,
   ConversationCreate,
   ConversationSession,
@@ -40,13 +46,26 @@ import type {
   InventoryItem,
   ItemEffect,
   LlmHealthResult,
-  LlmSettings,
+  LlmModelInfo,
   LlmSettingsUpdate,
+  RedactedLlmSettings,
   PromptEstimateRequest,
   PromptEstimateResult,
+  BenchCatalog,
+  BenchBaseline,
+  BenchBaselineValue,
+  BenchCaseResult,
+  BenchRunSummary,
+  BenchRunListItem,
+  BenchRunCaseRequest,
+  BenchRunRequest,
+  BenchSettingsSnapshot,
+  PromptCatalogEntry,
   MemoryCreate,
   Message,
   Moment,
+  PackInspectResult,
+  PackImportResult,
   MinigameFinish,
   MinigameFinishResponse,
   MinigameInfo,
@@ -108,6 +127,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Read an error Response into a `{ message, details }` pair, preferring the
+ * server's `{ error, details }` JSON body and falling back to the status text or
+ * a supplied sentence so the result is never empty. The body can only be read
+ * once, so call this exactly once per failed Response.
+ */
+async function parseErrorBody(res: Response, fallback: string): Promise<{ message: string; details?: unknown }> {
+  let message = res.statusText || fallback;
+  let details: unknown;
+  try {
+    const body = await res.json();
+    if (body && typeof body.error === 'string' && body.error) message = body.error;
+    details = body?.details;
+  } catch {
+    /* non-JSON error body — keep the fallback message */
+  }
+  return { message: message || fallback, details };
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(options.headers as Record<string, string> | undefined) };
   // Only declare a JSON content-type when we actually send a JSON body. A POST
@@ -118,15 +156,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
   if (!res.ok) {
-    let message = res.statusText;
-    let details: unknown;
-    try {
-      const body = await res.json();
-      message = body.error ?? message;
-      details = body.details;
-    } catch {
-      /* non-JSON error body */
-    }
+    const { message, details } = await parseErrorBody(res, `Request failed (${res.status}).`);
     throw new ApiError(message, res.status, details);
   }
   if (res.status === 204) return undefined as T;
@@ -149,6 +179,41 @@ export function assetUrl(relativePath: string): string {
   return `/uploads/${relativePath.replace(/^\/+/, '')}`;
 }
 
+/**
+ * Fetch a binary share file and save it via a temporary download link. Prefers the
+ * server's Content-Disposition filename, falling back to a supplied name.
+ */
+async function downloadShareFile(path: string, init: RequestInit, fallbackName: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, init);
+  if (!res.ok) {
+    const { message } = await parseErrorBody(res, `Download failed (${res.status}).`);
+    throw new ApiError(message, res.status);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^"]+)"?/.exec(cd);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = match?.[1] ?? fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** POST a single uploaded share file (multipart) and read the JSON response. */
+async function postShareFile<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const { message, details } = await parseErrorBody(res, `Upload failed (${res.status}).`);
+    throw new ApiError(message, res.status, details);
+  }
+  return res.json() as Promise<T>;
+}
+
 export interface StreamHandlers {
   onPlayer?: (message: Message) => void;
   onDelta?: (text: string) => void;
@@ -166,6 +231,9 @@ export interface StreamHandlers {
   onRapport?: (vibe: string, expression: string, rapport: number, delta: number) => void;
   /** The character lost interest and ended the date early (a soft exit). */
   onLeft?: (message: Message, reason: string) => void;
+  /** The player wound the date down to a natural close; the character said
+   *  goodbye. The client should run the normal end-and-evaluate flow. */
+  onFarewell?: (message: Message, expression?: string) => void;
 }
 
 /** Stream a chat reply via SSE (POST + ReadableStream reader). */
@@ -183,10 +251,39 @@ export async function streamChat(
     signal,
   });
   if (!res.ok || !res.body) {
-    handlers.onError?.(`Server returned ${res.status}`);
+    const { message } = await parseErrorBody(res, `The server couldn’t start the reply (${res.status}).`);
+    handlers.onError?.(message);
     return;
   }
-  const reader = res.body.getReader();
+  await pumpSse(res, handlers);
+}
+
+/**
+ * Re-run ONLY the character's reply for a date whose player turn is already saved
+ * but whose reply failed (errored, or the stream dropped). Does not send a new
+ * player message — the server replies to the existing last player turn. Emits the
+ * same delta/done/error/notice events as {@link streamChat} (no walkout/rapport/etc).
+ */
+export async function streamRetry(
+  sessionId: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${BASE}/conversations/${sessionId}/retry-stream`, {
+    method: 'POST',
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const { message } = await parseErrorBody(res, `The server couldn’t start the reply (${res.status}).`);
+    handlers.onError?.(message);
+    return;
+  }
+  await pumpSse(res, handlers);
+}
+
+/** Read an SSE response body to completion, dispatching each event to handlers. */
+async function pumpSse(res: Response, handlers: StreamHandlers): Promise<void> {
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -240,6 +337,11 @@ export async function streamChat(
         handlers.onLeft?.(p.message, p.reason);
         break;
       }
+      case 'farewell': {
+        const p = payload as { message: Message; expression?: string };
+        handlers.onFarewell?.(p.message, p.expression);
+        break;
+      }
     }
   };
 
@@ -256,9 +358,7 @@ export async function streamChat(
   }
 }
 
-export interface SettingsResponse extends LlmSettings {
-  apiKeySet: boolean;
-}
+export type SettingsResponse = RedactedLlmSettings;
 
 export const api = {
   health: () => get<{ ok: boolean }>('/health'),
@@ -266,10 +366,47 @@ export const api = {
   // settings
   getSettings: () => get<SettingsResponse>('/settings'),
   updateSettings: (update: LlmSettingsUpdate) => patch<SettingsResponse>('/settings', update),
-  testLlm: (override?: LlmSettingsUpdate) => post<LlmHealthResult>('/settings/test', override ?? {}),
-  listModels: () => get<{ ok: boolean; models: string[]; error?: string }>('/settings/models'),
+  testLlm: (override?: LlmSettingsUpdate & { role?: 'evaluator' | 'vision' }) =>
+    post<LlmHealthResult>('/settings/test', override ?? {}),
+  listModels: (override?: LlmSettingsUpdate & { role?: 'evaluator' | 'vision' }) =>
+    post<{ ok: boolean; models: LlmModelInfo[]; error?: string }>('/settings/models', override ?? {}),
   estimatePrompts: (input: Partial<PromptEstimateRequest>) =>
     post<PromptEstimateResult>('/settings/prompt-estimate', input),
+  /** Ping an AUTOMATIC1111 / SD txt2img endpoint (lists samplers; generates nothing). */
+  testImage: (baseUrl: string) => post<LlmHealthResult>('/settings/image/test', { baseUrl }),
+  /** List the samplers advertised by an SD endpoint (for the sampler picker). */
+  listImageSamplers: (baseUrl: string) =>
+    post<{ ok: boolean; samplers: string[]; error?: string }>('/settings/image/samplers', { baseUrl }),
+
+  // Prompt Editor — installation-local overrides for every system prompt / guardrail
+  listPrompts: () => get<{ entries: PromptCatalogEntry[] }>('/settings/prompts'),
+  savePromptOverride: (id: string, text: string) =>
+    request<PromptCatalogEntry>(`/settings/prompts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ text }),
+    }),
+  resetPromptOverride: (id: string) =>
+    del<PromptCatalogEntry>(`/settings/prompts/${encodeURIComponent(id)}`),
+
+  // Heartmorrow Bench — model evaluation harness
+  benchCatalog: () => get<BenchCatalog>('/bench/catalog'),
+  benchBaselines: () => get<{ baselines: BenchBaseline[] }>('/bench/baselines'),
+  benchSaveBaseline: (caseId: string, value: BenchBaselineValue, note = '') =>
+    request<BenchBaseline>(`/bench/baselines/${encodeURIComponent(caseId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value, note }),
+    }),
+  benchClearBaseline: (caseId: string) => del<{ ok: boolean }>(`/bench/baselines/${encodeURIComponent(caseId)}`),
+  /** Run ONE case. Accepts an AbortSignal so a long run can be cancelled. */
+  benchRunCase: (body: BenchRunCaseRequest, signal?: AbortSignal) =>
+    request<BenchCaseResult>('/bench/run-case', { method: 'POST', body: JSON.stringify(body), signal }),
+  /** Abort the in-flight case for a run id (server-side, proxy-independent). */
+  benchCancel: (runId: string) => post<{ ok: boolean; cancelled: boolean }>('/bench/cancel', { runId }),
+  benchSaveRun: (label: string, runReq: BenchRunRequest, results: BenchCaseResult[], settings?: BenchSettingsSnapshot | null) =>
+    post<BenchRunSummary>('/bench/runs', { label, request: runReq, results, settings: settings ?? null }),
+  benchRuns: () => get<{ runs: BenchRunListItem[] }>('/bench/runs'),
+  benchRun: (id: string) => get<BenchRunSummary>(`/bench/runs/${encodeURIComponent(id)}`),
+  benchDeleteRun: (id: string) => del<{ ok: boolean }>(`/bench/runs/${encodeURIComponent(id)}`),
 
   // player (per-world: money + persona live under the active world)
   getPlayer: (worldId?: string) => get<PlayerProfile>(`/player${worldQuery(worldId)}`),
@@ -284,9 +421,12 @@ export const api = {
   importCharacters: (worldId: string, sourceCharacterIds: string[]) =>
     post<Character[]>(`/worlds/${worldId}/import-characters`, { sourceCharacterIds }),
   updateWorld: (id: string, patchInput: WorldUpdate) => patch<World>(`/worlds/${id}`, patchInput),
-  deleteWorld: (id: string) => del<{ ok: true }>(`/worlds/${id}`),
+  deleteWorld: (id: string, deleteCharacters = false) =>
+    del<{ ok: true }>(`/worlds/${id}${deleteCharacters ? '?deleteCharacters=true' : ''}`),
   generateLocations: (worldId: string, input: GenerateLocationsInput) =>
     post<StructuredResult<Location[]>>(`/worlds/${worldId}/locations/generate`, input),
+  generateWorld: (input: GenerateWorldInput) =>
+    post<StructuredResult<WorldGenDraft>>(`/worlds/generate`, input),
   listWorldNotes: (worldId: string) => get<WorldNote[]>(`/worlds/${worldId}/notes`),
   createWorldNote: (worldId: string, input: WorldNoteCreate) =>
     post<WorldNote>(`/worlds/${worldId}/notes`, input),
@@ -305,6 +445,7 @@ export const api = {
   // characters (optional worldId scopes the roster to the active save)
   listCharacters: (worldId?: string) => get<Character[]>(`/characters${worldQuery(worldId)}`),
   socialWeb: (worldId?: string) => get<SocialWeb>(`/social-web${worldQuery(worldId)}`),
+  constellation: (worldId?: string) => get<ConstellationView>(`/constellation${worldQuery(worldId)}`),
   getCharacter: (id: string) => get<Character>(`/characters/${id}`),
   getCharacterBundle: (id: string) => get<CharacterBundle>(`/characters/${id}/bundle`),
   createCharacter: (input: CharacterCreate) => post<Character>('/characters', input),
@@ -314,6 +455,9 @@ export const api = {
     post<StructuredResult<ProfileGeneration>>('/characters/generate-profile', input),
   generateCharacterFromImage: (input: GenerateCharacterFromImageInput) =>
     post<StructuredResult<CharacterTemplateDraft>>('/characters/generate-from-image', input),
+  /** Unified generator: from a portrait, pasted/uploaded text, or both. */
+  generateCharacter: (input: GenerateCharacterFromSourcesInput) =>
+    post<StructuredResult<CharacterTemplateDraft>>('/characters/generate', input),
   updateCharacter: (id: string, patchInput: CharacterUpdate) =>
     patch<Character>(`/characters/${id}`, patchInput),
   deleteCharacter: (id: string) => del<{ ok: true }>(`/characters/${id}`),
@@ -325,6 +469,7 @@ export const api = {
   promptPreview: (id: string) => get<{ system: string; approxChars: number }>(`/characters/${id}/prompt-preview`),
   getChronicle: (id: string) => get<CharacterChronicle>(`/characters/${id}/chronicle`),
   getMoments: (id: string) => get<Moment[]>(`/characters/${id}/moments`),
+  dossier: (id: string) => get<CharacterDossier>(`/characters/${id}/dossier`),
   getRoom: (id: string) => get<{ name: string; description: string }>(`/characters/${id}/room`),
 
   // assets
@@ -337,12 +482,7 @@ export const api = {
     form.append('file', file);
     const res = await fetch(`${BASE}/assets`, { method: 'POST', body: form });
     if (!res.ok) {
-      let message = res.statusText;
-      try {
-        message = (await res.json()).error ?? message;
-      } catch {
-        /* ignore */
-      }
+      const { message } = await parseErrorBody(res, `Upload failed (${res.status}).`);
       throw new ApiError(message, res.status);
     }
     return res.json();
@@ -466,6 +606,16 @@ export const api = {
       relationshipDelta: Partial<Record<string, number>>;
       giftReaction?: { line: string; expression: string; sentiment: 'positive' | 'neutral' | 'negative'; itemName: string } | null;
     }>(`/phone/threads/${characterId}/send`, { text, imageAssetId, giftId }),
+  /** Regenerate a reply when a prior send saved the player's text but the model
+   *  failed to answer — no new player message is created. Same shape as phoneSend. */
+  phoneRetryReply: (characterId: string) =>
+    post<{
+      playerMessage: TextMessage;
+      reply: TextMessage | null;
+      error: string | null;
+      relationshipDelta: Partial<Record<string, number>>;
+      giftReaction?: { line: string; expression: string; sentiment: 'positive' | 'neutral' | 'negative'; itemName: string } | null;
+    }>(`/phone/threads/${characterId}/retry-reply`),
   phoneClaimGift: (textId: string) =>
     post<{ item: ShopItem; inventoryItem: InventoryItem }>(`/phone/messages/${textId}/claim-gift`),
   phoneEmails: (worldId?: string) => get<Email[]>(`/phone/emails${worldQuery(worldId)}`),
@@ -481,13 +631,50 @@ export const api = {
     post<FeedPostView>(`/phone/feed/posts/${postId}/comment`, { body }),
   facesSeen: (worldId: string) => post<{ ok: true }>('/phone/feed/seen', { worldId }),
 
-  // activities (work / training)
+  // activities (work / together)
   listActivities: () => get<ActivityDef[]>('/activities'),
   performActivity: (input: PerformActivity) =>
-    post<{ activityId: string; kind: string; money: number; relationship: Relationship | null; state: WorldState }>(
-      '/activities/perform',
-      input,
+    post<{
+      activityId: string;
+      kind: string;
+      money: number;
+      relationship: Relationship | null;
+      together: TogetherResult | null;
+      state: WorldState;
+      skill: string | null;
+      skillLevel: number;
+      skillLeveledUp: boolean;
+    }>('/activities/perform', input),
+
+  // share files (export/import of characters + worlds as .hmchr/.hmwrld/.hmpack)
+  exportCharacterFile: (id: string, name: string) =>
+    downloadShareFile(`/packs/character/${id}`, {}, `${name || 'character'}.hmchr`),
+  exportWorldFile: (id: string, name: string, includeCharacters = true) =>
+    downloadShareFile(
+      `/packs/world/${id}${includeCharacters ? '' : '?includeCharacters=false'}`,
+      {},
+      `${name || 'world'}.hmwrld`,
     ),
+  exportBundleFile: (selection: {
+    worldIds: string[];
+    characterIds: string[];
+    includeCharacters?: boolean;
+    title?: string;
+    note?: string;
+  }) =>
+    downloadShareFile(
+      '/packs/export',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection) },
+      'heartmorrow-bundle.hmpack',
+    ),
+  inspectPackFile: (file: File) => postShareFile<PackInspectResult>('/packs/inspect', file),
+  importPackFile: (file: File, targetWorldId?: string, includeCharacters = true) => {
+    const params = new URLSearchParams();
+    if (targetWorldId) params.set('targetWorldId', targetWorldId);
+    if (!includeCharacters) params.set('includeCharacters', 'false');
+    const qs = params.toString();
+    return postShareFile<PackImportResult>(`/packs/import${qs ? `?${qs}` : ''}`, file);
+  },
 
   // data / debug
   listEvents: () => get<GameEvent[]>('/events'),

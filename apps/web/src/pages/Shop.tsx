@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   describeItemEffect,
   type ItemCategory,
@@ -9,7 +10,7 @@ import {
 import { api } from '../lib/api';
 import { useAsync, errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
-import { useT } from '../i18n';
+import { itemCategoryLabel, itemRarityLabel } from '../i18n/labels';
 import { Banner, Empty, Field, Loader, ConfirmDialog } from '../components/ui';
 import { Icon, type IconName } from '../components/Icon';
 import './shop.page.css';
@@ -31,7 +32,7 @@ interface Draft {
 }
 
 export function Shop() {
-  const t = useT();
+  const { t } = useTranslation(['pages', 'common']);
   const { player, reloadPlayer, creatorMode, activeWorld, activeWorldId } = useAppData();
   const state = useAsync(() => api.listShopItems());
   const [note, setNote] = useState<string>();
@@ -131,7 +132,7 @@ export function Shop() {
     try {
       const kept = drafts.filter((d) => d.keep).map((d) => d.item);
       for (const item of kept) await api.createShopItem(item);
-      setNote(t('shop.savedItems', { count: kept.length }));
+      setNote(t('shop.saved', { count: kept.length }));
       setGenOpen(false);
       setDrafts([]);
       state.reload();
@@ -154,9 +155,9 @@ export function Shop() {
       <div className="card shop-counter">
         <div className="shop-counter-lamp"><Icon name="shop" size={28} /></div>
         <div className="shop-counter-text">
-          <div className="kicker">{t('shop.shelfKicker')}</div>
+          <div className="kicker">{t('shop.kicker')}</div>
           <h1>{t('shop.title')}</h1>
-          <p>{t('shop.lede')}</p>
+          <p>{t('shop.blurb')}</p>
         </div>
         <div className="shop-counter-side">
           <span className="shop-purse">
@@ -177,17 +178,17 @@ export function Shop() {
         <div className="framed shop-gen stack">
           <div className="shop-gen-head">
             <div>
-              <div className="kicker">{t('mkt.workshop')}</div>
+              <div className="kicker">{t('shop.workshop')}</div>
               <h2>{t('shop.genTitle')}</h2>
             </div>
             <button className="btn ghost sm" onClick={closeGen}>
-              {t('common.close')}
+              {t('shop.close')}
             </button>
           </div>
           <p className="hint" style={{ marginTop: 0 }}>
-            {t('shop.genLeadPrefix')}
+            {t('shop.genHintPre')}
             {activeWorld ? <strong>{activeWorld.name}</strong> : t('shop.genericSetting')}
-            {t('shop.genLeadSuffix')}
+            {t('shop.genHintPost')}
           </p>
 
           <div className="inline-fields">
@@ -205,23 +206,23 @@ export function Shop() {
                 value={genForm.rarityHint}
                 onChange={(e) => setGenForm({ ...genForm, rarityHint: e.target.value as '' | ItemRarity })}
               >
-                <option value="">{t('mkt.any')}</option>
+                <option value="">{t('shop.any')}</option>
                 {RARITIES.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {itemRarityLabel(r)}
                   </option>
                 ))}
               </select>
             </Field>
-            <Field label={t('prop.categoryHint')}>
+            <Field label={t('shop.categoryHint')}>
               <select
                 value={genForm.categoryHint}
                 onChange={(e) => setGenForm({ ...genForm, categoryHint: e.target.value as '' | ItemCategory })}
               >
-                <option value="">{t('mkt.any')}</option>
+                <option value="">{t('shop.any')}</option>
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {itemCategoryLabel(c)}
                   </option>
                 ))}
               </select>
@@ -245,7 +246,7 @@ export function Shop() {
               />
             </Field>
           </div>
-          <Field label={t('mkt.theme')} hint={t('shop.themeHint')}>
+          <Field label={t('shop.theme')} hint={t('shop.themeHint')}>
             <textarea
               value={genForm.theme}
               onChange={(e) => setGenForm({ ...genForm, theme: e.target.value })}
@@ -255,20 +256,20 @@ export function Shop() {
 
           <div className="row">
             <button className="btn primary" onClick={generate} disabled={generating}>
-              {generating ? t('editor.generating') : <><Icon name="generate" size={15} /> {t('mkt.generate')}</>}
+              {generating ? t('shop.generating') : <><Icon name="generate" size={15} /> {t('shop.generate')}</>}
             </button>
             {drafts.length > 0 && (
               <button className="btn" onClick={save} disabled={saving || keptCount === 0}>
-                {saving ? t('common.saving') : t('mkt.saveSelected', { count: keptCount })}
+                {saving ? t('shop.saving') : t('shop.saveSelected', { count: keptCount })}
               </button>
             )}
           </div>
 
           {drafts.length > 0 && (
             <>
-              <div className="shop-gen-divider">{t('mkt.reviewRefine')}</div>
+              <div className="shop-gen-divider">{t('shop.reviewRefine')}</div>
               <p className="hint" style={{ marginTop: 0 }}>
-                {t('shop.genReview', { count: drafts.length })}
+                {t('shop.reviewHint', { count: drafts.length })}
               </p>
               <div className="shop-drafts">
                 {drafts.map((d, i) => (
@@ -276,12 +277,12 @@ export function Shop() {
                     <div className="shop-draft-top">
                       <label className="shop-draft-keep">
                         <input type="checkbox" checked={d.keep} onChange={() => toggleKeep(i)} />
-                        {d.keep ? t('mkt.keep') : t('mkt.skipped')}
+                        {d.keep ? t('shop.keep') : t('shop.skipped')}
                       </label>
                       <span className="money-pill">◈ {d.item.price ?? 0}</span>
                     </div>
                     <div className="inline-fields">
-                      <Field label={t('mkt.name')}>
+                      <Field label={t('shop.name')}>
                         <input value={d.item.name} onChange={(e) => editDraft(i, { name: e.target.value })} />
                       </Field>
                       <Field label={t('shop.price')}>
@@ -301,25 +302,25 @@ export function Shop() {
                         >
                           {RARITIES.map((r) => (
                             <option key={r} value={r}>
-                              {r}
+                              {itemRarityLabel(r)}
                             </option>
                           ))}
                         </select>
                       </Field>
-                      <Field label={t('prop.category')}>
+                      <Field label={t('shop.category')}>
                         <select
                           value={d.item.category ?? 'gift'}
                           onChange={(e) => editDraft(i, { category: e.target.value as ItemCategory })}
                         >
                           {CATEGORIES.map((c) => (
                             <option key={c} value={c}>
-                              {c}
+                              {itemCategoryLabel(c)}
                             </option>
                           ))}
                         </select>
                       </Field>
                     </div>
-                    <Field label={t('mkt.description')}>
+                    <Field label={t('shop.description')}>
                       <textarea
                         value={d.item.description ?? ''}
                         onChange={(e) => editDraft(i, { description: e.target.value })}
@@ -347,15 +348,15 @@ export function Shop() {
           items.length === 0 ? (
             <Empty icon={<Icon name="shop" size={34} />} title={t('shop.emptyTitle')}>
               <p className="muted">
-                {creatorMode ? t('shop.emptyCreator') : t('shop.emptyPlay')}
+                {creatorMode ? t('shop.emptyCreator') : t('shop.emptyPlayer')}
               </p>
             </Empty>
           ) : (
             <>
               <div className="section-head shop-shelf-head">
                 <div className="titles">
-                  <div className="kicker">{t('shop.onShelf')}</div>
-                  <h2>{t(items.length === 1 ? 'shop.inStockOne' : 'shop.inStockMany', { count: items.length })}</h2>
+                  <div className="kicker">{t('shop.onTheShelf')}</div>
+                  <h2>{t('shop.inStock', { count: items.length })}</h2>
                 </div>
                 <div className="trail" />
               </div>
@@ -372,9 +373,9 @@ export function Shop() {
                           </div>
                           <div className="flex-fill">
                             <h3 className="shop-item-name">{item.name}</h3>
-                            <div className="shop-item-cat">{item.category}</div>
+                            <div className="shop-item-cat">{itemCategoryLabel(item.category)}</div>
                           </div>
-                          <span className="shop-item-rarity">{item.rarity}</span>
+                          <span className="shop-item-rarity">{itemRarityLabel(item.rarity)}</span>
                         </div>
                         <p className="shop-item-desc">{item.description}</p>
                         {item.effects.length > 0 && (
@@ -393,7 +394,7 @@ export function Shop() {
                         </span>
                         {!item.infiniteStock && (
                           <span className={`shop-stock${soldOut ? ' out' : ''}`}>
-                            {soldOut ? t('shop.outOfStock') : t('shop.leftCount', { count: item.stock })}
+                            {soldOut ? t('shop.outOfStock') : t('shop.stockLeft', { count: item.stock })}
                           </span>
                         )}
                       </div>
@@ -403,7 +404,7 @@ export function Shop() {
                           disabled={soldOut || cantAfford || buyingId !== null}
                           onClick={() => buy(item)}
                         >
-                          {soldOut ? t('shop.soldOut') : cantAfford ? t('prop.notEnough') : buyingId === item.id ? t('shop.buying') : t('prop.buy')}
+                          {soldOut ? t('shop.soldOut') : cantAfford ? t('shop.notEnough') : buyingId === item.id ? t('shop.buying') : t('shop.buy')}
                         </button>
                         {creatorMode && (
                           <button className="btn danger ghost" onClick={() => setPendingDelete(item)} title={t('shop.deleteItem')} aria-label={t('shop.deleteItem')}>
@@ -422,9 +423,9 @@ export function Shop() {
 
       {pendingDelete && (
         <ConfirmDialog
-          title={t('people.delete.title', { name: pendingDelete.name })}
-          body={t('shop.deleteBody')}
-          confirmLabel={t('common.delete')}
+          title={t('shop.confirmDeleteTitle', { name: pendingDelete.name })}
+          body={t('shop.confirmDeleteBody')}
+          confirmLabel={t('shop.confirmDelete')}
           danger
           busy={deleting}
           onConfirm={() => removeItem(pendingDelete)}

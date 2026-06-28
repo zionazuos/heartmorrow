@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   effectiveDatingStats,
   isInternalFlagKey,
@@ -20,38 +21,30 @@ import {
 import { api } from '../lib/api';
 import { useAsync, errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
-import { useT, type TFunc } from '../i18n';
-import type { MessageKey } from '../i18n/locales/en';
 import {
-  statusLabel,
-  relStyleLabel,
-  linkLabel,
-  genderLabel,
-  sexualityLabel,
+  characterLinkLabel,
   datingStatLabel,
-  weatherLabel as weatherLabelTr,
-  dayLabel,
-} from '../i18n/sharedLabels';
+  genderLabel,
+  relationshipStatusLabel,
+  relationshipStyleLabel,
+  relativeTime,
+  sexualityLabel,
+  weatherLabel,
+  weekdayAbbr,
+} from '../i18n/labels';
 import { Portrait } from '../components/Portrait';
 import { Icon } from '../components/Icon';
 import { CrisisResources } from '../components/CrisisResources';
 import { DatingBars, RelationshipBars } from '../components/StatBars';
 import { Banner, Empty, Loader, ConfirmDialog } from '../components/ui';
+import { ShareExportDialog } from '../components/ShareTools';
 import './profile.page.css';
 
-function ago(ts: number, t: TFunc): string {
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60) return t('profile.ago.justNow');
-  const m = Math.floor(s / 60);
-  if (m < 60) return t('profile.ago.minutes', { m });
-  const h = Math.floor(m / 60);
-  if (h < 24) return t('profile.ago.hours', { h });
-  return t('profile.ago.days', { d: Math.floor(h / 24) });
-}
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
 /** A friendly summary of where the relationship stands — uses the shared band
  *  labels (single source of truth in social.ts) so it never drifts. */
-function relationshipStatus(rel: Relationship, t: TFunc): string {
+function relationshipStatus(rel: Relationship, t: TFn): string {
   const label = relationshipStage(rel).label;
   const display = label.charAt(0).toUpperCase() + label.slice(1);
   return rel.tension >= 60 ? `${display}${t('profile.tenseSuffix')}` : display;
@@ -65,20 +58,16 @@ const weatherIcon = (k: string) => WEATHER_ICONS[k as keyof typeof WEATHER_ICONS
 
 type TabId = 'overview' | 'about' | 'profile' | 'history' | 'memories';
 
-const TABS: { id: TabId; labelKey: MessageKey }[] = [
-  { id: 'overview', labelKey: 'profile.tab.overview' },
-  { id: 'about',    labelKey: 'profile.tab.about' },
-  { id: 'profile',  labelKey: 'profile.tab.profile' },
-  { id: 'history',  labelKey: 'profile.tab.history' },
-  { id: 'memories', labelKey: 'profile.tab.memories' },
-];
+const TAB_IDS: TabId[] = ['overview', 'about', 'profile', 'history', 'memories'];
 
 export function CharacterProfile() {
+  const { t } = useTranslation(['pages', 'common']);
   const { id = '' } = useParams();
   const nav = useNavigate();
-  const t = useT();
   const { creatorMode, dayTick } = useAppData();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const bundle = useAsync(() => api.getCharacterBundle(id), [id]);
@@ -148,16 +137,16 @@ export function CharacterProfile() {
           worldDay != null &&
           worldDay - breakupDay < RECONCILE_COOLDOWN_DAYS;
 
-        const nameOf = (cid: string) => (characters.data ?? []).find((c) => c.id === cid)?.name ?? t('common.someone');
+        const nameOf = (cid: string) => (characters.data ?? []).find((c) => c.id === cid)?.name ?? t('profile.someone');
         const connections = character.links.filter((l) => l.targetId);
 
         const dates = chronicle.data?.sessionCount ?? 0;
         const toolTag = memorial
-          ? t('profile.tag.inMemoriam')
+          ? t('profile.inMemoriam2')
           : brokenUp
-            ? t('profile.tag.parted')
+            ? t('profile.parted')
             : status !== 'none'
-              ? statusLabel(t, status).toLowerCase()
+              ? relationshipStatusLabel(status).toLowerCase()
               : relationshipStage(relationship).label;
 
         const hasAbout =
@@ -194,7 +183,7 @@ export function CharacterProfile() {
             <div className="framed prof-mast">
               <div className="prof-mast-titles">
                 <div className="prof-mast-meta">
-                  <span className="kicker">{t('profile.mast.kicker')}</span>
+                  <span className="kicker">{t('profile.dossier')}</span>
                   <span className="prof-mast-tag">{toolTag}</span>
                 </div>
                 <h1>{character.name}</h1>
@@ -205,16 +194,16 @@ export function CharacterProfile() {
                   {character.gender !== 'unspecified' && (
                     <>
                       <span className="sep">·</span>
-                      {genderLabel(t, character.gender)}
+                      {genderLabel(character.gender)}
                     </>
                   )}
                   <span className="sep">·</span>
-                  {relStyleLabel(t, character.relationshipStyle)}
+                  {relationshipStyleLabel(character.relationshipStyle)}
                   {character.sexuality !== 'unspecified' &&
                     (creatorMode || relationship.flags['state:orientationRevealed'] === true) && (
                       <>
                         <span className="sep">·</span>
-                        {sexualityLabel(t, character.sexuality)}
+                        {sexualityLabel(character.sexuality)}
                       </>
                     )}
                 </div>
@@ -223,19 +212,22 @@ export function CharacterProfile() {
               <div className="prof-mast-actions">
                 {!memorial && (
                   <Link className="btn primary" to={`/chat?character=${character.id}`}>
-                    <Icon name="date" size={16} /> {t('people.date')}
+                    <Icon name="date" size={16} /> {t('profile.date')}
                   </Link>
                 )}
                 {creatorMode && (
                   <>
                     <Link className="btn" to={`/characters/${character.id}/edit`}>
-                      <Icon name="edit" size={16} /> {t('common.edit')}
+                      <Icon name="edit" size={16} /> {t('profile.edit')}
                     </Link>
-                    <button className="btn ghost" onClick={duplicate} disabled={busy}>
-                      <Icon name="duplicate" size={16} /> {t('common.duplicate')}
+                    <button className="btn ghost" onClick={() => setConfirmDuplicate(true)} disabled={busy}>
+                      <Icon name="duplicate" size={16} /> {t('profile.duplicate')}
+                    </button>
+                    <button className="btn ghost" onClick={() => setExporting(true)} disabled={busy}>
+                      <Icon name="download" size={16} /> {t('profile.export')}
                     </button>
                     <button className="btn danger ghost" onClick={() => setConfirmDelete(true)} disabled={busy}>
-                      <Icon name="trash" size={16} /> {t('common.delete')}
+                      <Icon name="trash" size={16} /> {t('profile.delete')}
                     </button>
                   </>
                 )}
@@ -245,20 +237,24 @@ export function CharacterProfile() {
             {/* Endgame banners — always visible, above the tabbed canvas */}
             {memorial && (
               <>
-                <Banner kind="error">{t('profile.memorial.banner', { name: character.name })}</Banner>
+                <Banner kind="error">
+                  {t('profile.memorialBanner', { name: character.name })}
+                </Banner>
                 <CrisisResources />
               </>
             )}
             {!memorial && brokenUp && (
               <Banner kind="error">
-                {t('profile.brokenUp.intro')}
+                {t('profile.brokeUp')}{' '}
                 {needsSpace
-                  ? t('profile.brokenUp.needsSpace', { name: character.name })
-                  : t('profile.brokenUp.open', { name: character.name })}
+                  ? t('profile.needsSpace', { name: character.name })
+                  : t('profile.openToReconcile', { name: character.name })}
               </Banner>
             )}
             {!memorial && !brokenUp && onTheRocks && (
-              <Banner kind="info">{t('profile.onTheRocks', { name: character.name })}</Banner>
+              <Banner kind="info">
+                {t('profile.onTheRocksBanner', { name: character.name })}
+              </Banner>
             )}
 
             {/* ===== Two-column canvas: portrait rail + tabbed content ===== */}
@@ -273,21 +269,21 @@ export function CharacterProfile() {
                   </div>
                   <div className="prof-rail-badges">
                     {memorial ? (
-                      <span className="badge danger"><Icon name="remember" size={13} /> {t('profile.badge.inMemoriam')}</span>
+                      <span className="badge danger"><Icon name="remember" size={13} /> {t('profile.inMemoriamBadge')}</span>
                     ) : brokenUp ? (
                       <>
-                        <span className="badge danger"><Icon name="breakup" size={13} /> {t('profile.badge.brokenUp')}</span>
-                        <span className="badge warn">{needsSpace ? t('profile.badge.needsSpace') : t('profile.badge.openReconcile')}</span>
+                        <span className="badge danger"><Icon name="breakup" size={13} /> {t('profile.brokenUpBadge')}</span>
+                        <span className="badge warn">{needsSpace ? t('profile.needsSpaceBadge') : t('profile.openBadge')}</span>
                       </>
                     ) : (
                       <>
-                        <span className="badge accent">{relationshipStatus(relationship, t)}</span>
+                        <span className="badge accent">{relationshipStatus(relationship, t as unknown as TFn)}</span>
                         {status !== 'none' && (
                           <span className="badge accent">
-                            <Icon name="affection" size={13} /> {statusLabel(t, status)}
+                            <Icon name="affection" size={13} /> {relationshipStatusLabel(status)}
                           </span>
                         )}
-                        {onTheRocks && <span className="badge warn"><Icon name="warn" size={13} /> {t('profile.badge.onTheRocks')}</span>}
+                        {onTheRocks && <span className="badge warn"><Icon name="warn" size={13} /> {t('profile.onTheRocksBadge')}</span>}
                       </>
                     )}
                   </div>
@@ -297,15 +293,15 @@ export function CharacterProfile() {
                   <div className="prof-rail-figs">
                     <div className="prof-rail-fig">
                       <span className="prof-rail-fig-n">{convoCount}</span>
-                      <span className="prof-rail-fig-l">{t('profile.figs.chats')}</span>
+                      <span className="prof-rail-fig-l">{t('profile.chats')}</span>
                     </div>
                     <div className="prof-rail-fig">
                       <span className="prof-rail-fig-n">{dates}</span>
-                      <span className="prof-rail-fig-l">{t('profile.figs.dates')}</span>
+                      <span className="prof-rail-fig-l">{t('profile.dates')}</span>
                     </div>
                     <div className="prof-rail-fig">
                       <span className="prof-rail-fig-n">{memories.length}</span>
-                      <span className="prof-rail-fig-l">{t('profile.figs.memories')}</span>
+                      <span className="prof-rail-fig-l">{t('profile.memoriesShort')}</span>
                     </div>
                   </div>
                 </div>
@@ -314,15 +310,15 @@ export function CharacterProfile() {
               {/* Content column */}
               <div className="prof-main stack">
                 {/* Tab nav */}
-                <nav className="prof-tabs" aria-label={t('profile.tabsAria')}>
-                  {TABS.map((tab) => (
+                <nav className="prof-tabs" aria-label={t('profile.sectionsAria')}>
+                  {TAB_IDS.map((tab) => (
                     <button
-                      key={tab.id}
+                      key={tab}
                       type="button"
-                      className={`prof-tab ${activeTab === tab.id ? 'prof-tab-active' : ''}`}
-                      onClick={() => setActiveTab(tab.id)}
+                      className={`prof-tab ${activeTab === tab ? 'prof-tab-active' : ''}`}
+                      onClick={() => setActiveTab(tab)}
                     >
-                      {t(tab.labelKey)}
+                      {t(`profile.tabs.${tab}`)}
                     </button>
                   ))}
                 </nav>
@@ -332,8 +328,8 @@ export function CharacterProfile() {
                   <div className="card">
                     <div className="section-head">
                       <div className="titles">
-                        <span className="kicker">{t('profile.overview.kicker')}</span>
-                        <h2>{t('profile.overview.title')}</h2>
+                        <span className="kicker">{t('profile.betweenYou')}</span>
+                        <h2>{t('profile.yourRelationship')}</h2>
                       </div>
                       <span className="trail" />
                     </div>
@@ -344,12 +340,12 @@ export function CharacterProfile() {
                       <div className="prof-meta-row">
                         {buffs.length > 0 && (
                           <div>
-                            <div className="prof-subhead">{t('profile.overview.buffs')}</div>
+                            <div className="prof-subhead">{t('profile.activeBuffs')}</div>
                             <div className="tags">
                               {buffs.map((b) => (
                                 <span className={`badge prof-buff${b.delta < 0 ? ' down' : ''}`} key={b.stat}>
                                   {b.delta >= 0 ? '+' : ''}
-                                  {b.delta} {datingStatLabel(t, b.stat)} <span className="left">{t('profile.overview.buffLeft', { n: b.remaining })}</span>
+                                  {b.delta} {datingStatLabel(b.stat)} <span className="left">{t('profile.buffLeft', { remaining: b.remaining })}</span>
                                 </span>
                               ))}
                             </div>
@@ -357,7 +353,7 @@ export function CharacterProfile() {
                         )}
                         {storyFlags.length > 0 && (
                           <div>
-                            <div className="prof-subhead">{t('profile.overview.story')}</div>
+                            <div className="prof-subhead">{t('profile.yourStory')}</div>
                             <div className="tags">
                               {storyFlags.map(([k, label]) => (
                                 <span className="tag prof-flag" key={k}>
@@ -374,11 +370,11 @@ export function CharacterProfile() {
                   <div className="card">
                     <div className="section-head">
                       <div className="titles">
-                        <span className="kicker">{t('profile.dating.kicker')}</span>
-                        <h2>{t('profile.dating.title')}</h2>
+                        <span className="kicker">{t('profile.howTheyDate')}</span>
+                        <h2>{t('profile.datingStats')}</h2>
                       </div>
                       <span className="trail" />
-                      {buffs.length > 0 && <span className="muted">{t('profile.dating.withBuffs')}</span>}
+                      {buffs.length > 0 && <span className="muted">{t('profile.withBuffs')}</span>}
                     </div>
                     <div className="prof-gaugegrid">
                       <DatingBars stats={effective} />
@@ -389,15 +385,15 @@ export function CharacterProfile() {
                     <div className="card">
                       <div className="section-head">
                         <div className="titles">
-                          <span className="kicker">{t('profile.conns.kicker')}</span>
-                          <h2>{t('profile.conns.title')}</h2>
+                          <span className="kicker">{t('profile.theirWeb')}</span>
+                          <h2>{t('profile.connections')}</h2>
                         </div>
                         <span className="trail" />
                       </div>
                       <div className="prof-conns">
                         {connections.map((l, i) => (
                           <Link className="prof-conn" to={`/characters/${l.targetId}`} key={i}>
-                            <span className="prof-conn-kind">{linkLabel(t, l.kind)}</span>
+                            <span className="prof-conn-kind">{characterLinkLabel(l.kind)}</span>
                             <span className="prof-conn-name flex-fill">{nameOf(l.targetId)}</span>
                             <Icon name="chevronRight" size={15} />
                           </Link>
@@ -414,14 +410,14 @@ export function CharacterProfile() {
                       <div className="card">
                         <div className="section-head">
                           <div className="titles">
-                            <span className="kicker">{t('profile.about.kicker')}</span>
-                            <h2>{t('profile.about.title')}</h2>
+                            <span className="kicker">{t('profile.whoTheyAre')}</span>
+                            <h2>{t('profile.personalityVoice')}</h2>
                           </div>
                           <span className="trail" />
                         </div>
                         {character.personality && <p className="prof-personality">{character.personality}</p>}
-                        <Prose label={t('profile.about.speechStyle')} value={character.speechStyle} />
-                        <Prose label={t('profile.about.wants')} value={character.relationshipPreferences} />
+                        <Prose label={t('profile.speechStyle')} value={character.speechStyle} />
+                        <Prose label={t('profile.whatTheyWant')} value={character.relationshipPreferences} />
                       </div>
 
                       {(character.likes.length > 0 ||
@@ -431,24 +427,24 @@ export function CharacterProfile() {
                         <div className="card">
                           <div className="section-head">
                             <div className="titles">
-                              <span className="kicker">{t('profile.traits.kicker')}</span>
-                              <h2>{t('profile.traits.title')}</h2>
+                              <span className="kicker">{t('profile.tastesLimits')}</span>
+                              <h2>{t('profile.traitsBoundaries')}</h2>
                             </div>
                             <span className="trail" />
                           </div>
                           <div className="prof-taxons">
-                            <TagRow label={t('profile.traits.likes')} items={character.likes} variant="like" />
-                            <TagRow label={t('profile.traits.dislikes')} items={character.dislikes} variant="dislike" />
-                            <TagRow label={t('profile.traits.goals')} items={character.goals} />
-                            <TagRow label={t('profile.traits.boundaries')} items={character.boundaries} />
+                            <TagRow label={t('profile.likes')} items={character.likes} variant="like" />
+                            <TagRow label={t('profile.dislikes')} items={character.dislikes} variant="dislike" />
+                            <TagRow label={t('profile.goals')} items={character.goals} />
+                            <TagRow label={t('profile.boundaries')} items={character.boundaries} />
                           </div>
                         </div>
                       )}
                     </>
                   ) : (
                     <div className="card">
-                      <Empty icon={<Icon name="people" size={34} />} title={t('profile.about.emptyTitle')}>
-                        <p className="muted">{t('profile.about.emptyLede', { name: character.name })}</p>
+                      <Empty icon={<Icon name="people" size={34} />} title={t('profile.nothingWritten')}>
+                        <p className="muted">{t('profile.noPersonality', { name: character.name })}</p>
                       </Empty>
                     </div>
                   )}
@@ -466,26 +462,22 @@ export function CharacterProfile() {
                         <div className="card">
                           <div className="section-head">
                             <div className="titles">
-                              <span className="kicker">{t('profile.presence.kicker')}</span>
-                              <h2>{t('profile.presence.title')}</h2>
+                              <span className="kicker">{t('profile.presence')}</span>
+                              <h2>{t('profile.profilePresence')}</h2>
                             </div>
                             <span className="trail" />
                           </div>
-                          <Prose label={t('profile.presence.appearance')} value={character.appearance} />
-                          <Prose label={t('profile.presence.textingStyle')} value={character.textingStyle} />
-                          <Prose label={t('profile.presence.onlinePersona')} value={character.onlinePersona} />
-                          <Prose label={t('profile.presence.loveLanguage')} value={character.loveLanguage} />
+                          <Prose label={t('profile.appearance')} value={character.appearance} />
+                          <Prose label={t('profile.textingStyle')} value={character.textingStyle} />
+                          <Prose label={t('profile.onlinePersona')} value={character.onlinePersona} />
+                          <Prose label={t('profile.loveLanguage')} value={character.loveLanguage} />
                           {character.employment && (
                             <div className="prof-detail">
-                              <div className="prof-detail-label">{t('profile.presence.work')}</div>
+                              <div className="prof-detail-label">{t('profile.work')}</div>
                               <p className="prof-detail-text">
-                                {t('profile.presence.workLine', {
-                                  title: character.employment.title,
-                                  place: character.employment.place,
-                                  shift: character.employment.shiftPhase,
-                                })}
+                                {t('profile.workLine', { title: character.employment.title, place: character.employment.place, phase: character.employment.shiftPhase })}
                                 {character.employment.workdays.length > 0 &&
-                                  ` · ${character.employment.workdays.map((d) => (DAYS_OF_WEEK[d] ? dayLabel(t, DAYS_OF_WEEK[d]).slice(0, 3) : '')).join(' ')}`}
+                                  ` · ${character.employment.workdays.map((d) => weekdayAbbr(DAYS_OF_WEEK[d] ?? '')).join(' ')}`}
                               </p>
                             </div>
                           )}
@@ -500,17 +492,17 @@ export function CharacterProfile() {
                         <div className="card">
                           <div className="section-head">
                             <div className="titles">
-                              <span className="kicker">{t('profile.chem.kicker')}</span>
-                              <h2>{t('profile.chem.title')}</h2>
+                              <span className="kicker">{t('profile.littleThings')}</span>
+                              <h2>{t('profile.chemistryQuirks')}</h2>
                             </div>
                             <span className="trail" />
                           </div>
                           <div className="prof-taxons">
-                            <TagRow label={t('profile.chem.physicalNeeds')} items={character.physicalNeeds} />
-                            <TagRow label={t('profile.chem.physicalDesires')} items={character.physicalDesires} variant="like" />
-                            <TagRow label={t('profile.chem.physicalDislikes')} items={character.physicalDislikes} variant="dislike" />
-                            <TagRow label={t('profile.chem.insecurities')} items={character.insecurities} />
-                            <TagRow label={t('profile.chem.quirks')} items={character.quirks} />
+                            <TagRow label={t('profile.physicalNeeds')} items={character.physicalNeeds} />
+                            <TagRow label={t('profile.physicalDesires')} items={character.physicalDesires} variant="like" />
+                            <TagRow label={t('profile.physicalDislikes')} items={character.physicalDislikes} variant="dislike" />
+                            <TagRow label={t('profile.insecurities')} items={character.insecurities} />
+                            <TagRow label={t('profile.quirks')} items={character.quirks} />
                           </div>
                         </div>
                       )}
@@ -519,20 +511,20 @@ export function CharacterProfile() {
                         <div className="card">
                           <div className="section-head">
                             <div className="titles">
-                              <span className="kicker">{t('profile.weather.kicker')}</span>
-                              <h2>{t('profile.weather.title')}</h2>
+                              <span className="kicker">{t('profile.underSkies')}</span>
+                              <h2>{t('profile.weather')}</h2>
                             </div>
                             <span className="trail" />
                           </div>
                           <div className="prof-weather">
                             {character.favoriteWeather.map((k) => (
                               <span className="prof-weather-chip fav" key={`f-${k}`}>
-                                ♥ {weatherIcon(k)} {weatherLabelTr(t, k)}
+                                ♥ {weatherIcon(k)} {weatherLabel(k)}
                               </span>
                             ))}
                             {character.dislikedWeather.map((k) => (
                               <span className="prof-weather-chip dis" key={`d-${k}`}>
-                                ✕ {weatherIcon(k)} {weatherLabelTr(t, k)}
+                                ✕ {weatherIcon(k)} {weatherLabel(k)}
                               </span>
                             ))}
                           </div>
@@ -543,8 +535,8 @@ export function CharacterProfile() {
                         <div className="card">
                           <div className="section-head">
                             <div className="titles">
-                              <span className="kicker">{t('profile.space.kicker')}</span>
-                              <h2>{t('profile.space.title')}</h2>
+                              <span className="kicker">{t('profile.whereTheyLive')}</span>
+                              <h2>{t('profile.theirSpace')}</h2>
                             </div>
                             <span className="trail" />
                           </div>
@@ -554,8 +546,10 @@ export function CharacterProfile() {
                     </>
                   ) : (
                     <div className="card">
-                      <Empty icon={<Icon name="phone" size={34} />} title={t('profile.profile.emptyTitle')}>
-                        <p className="muted">{t('profile.profile.emptyLede')}</p>
+                      <Empty icon={<Icon name="phone" size={34} />} title={t('profile.noProfileTitle')}>
+                        <p className="muted">
+                          {t('profile.noProfileBody')}
+                        </p>
                       </Empty>
                     </div>
                   )}
@@ -567,12 +561,12 @@ export function CharacterProfile() {
                     <div className="card">
                       <div className="section-head">
                         <div className="titles">
-                          <span className="kicker">{t('profile.history.kicker')}</span>
-                          <h2>{t('profile.history.title')}</h2>
+                          <span className="kicker">{t('profile.storySoFar')}</span>
+                          <h2>{t('profile.yourHistory')}</h2>
                         </div>
                         <span className="trail" />
                         <span className="readout">
-                          <span className="num">{chronicle.data!.sessionCount}</span> {t('profile.figs.dates')}
+                          <span className="num">{chronicle.data!.sessionCount}</span> {t('profile.datesReadout')}
                         </span>
                       </div>
                       {chronicle.data!.chronicle && <div className="prof-chronicle">{chronicle.data!.chronicle}</div>}
@@ -580,7 +574,7 @@ export function CharacterProfile() {
                         <ul className="prof-log">
                           {chronicle.data!.recentLines.map((l, i) => (
                             <li key={i} className="prof-log-line">
-                              <span className="prof-log-day">{t('profile.history.day', { day: l.day })}</span>
+                              <span className="prof-log-day">{t('profile.day', { day: l.day })}</span>
                               <span>{l.line}</span>
                             </li>
                           ))}
@@ -589,8 +583,8 @@ export function CharacterProfile() {
                     </div>
                   ) : (
                     <div className="card">
-                      <Empty icon={<Icon name="date" size={34} />} title={t('profile.history.emptyTitle')}>
-                        <p className="muted">{t('profile.history.emptyLede', { name: character.name })}</p>
+                      <Empty icon={<Icon name="date" size={34} />} title={t('profile.noHistoryTitle')}>
+                        <p className="muted">{t('profile.noHistoryBody', { name: character.name })}</p>
                       </Empty>
                     </div>
                   )}
@@ -598,22 +592,41 @@ export function CharacterProfile() {
 
                 {/* ---- Tab: Memories ---- */}
                 <div className={panelClass('memories')}>
-                  <MemoriesSection memories={memories} characterName={character.name} onDelete={deleteMemory} t={t} />
+                  <MemoriesSection memories={memories} characterName={character.name} onDelete={deleteMemory} />
                 </div>
               </div>
             </div>
 
             {bundle.error && <Banner kind="error">{bundle.error}</Banner>}
 
+            {exporting && (
+              <ShareExportDialog worlds={[]} characters={[character]} onClose={() => setExporting(false)} />
+            )}
+
             {confirmDelete && (
               <ConfirmDialog
-                title={t('people.delete.title', { name: character.name })}
-                body={t('people.delete.body')}
-                confirmLabel={t('common.delete')}
+                title={t('profile.confirmDeleteTitle', { name: character.name })}
+                body={t('profile.confirmDeleteBody')}
+                confirmLabel={t('profile.delete')}
                 danger
                 busy={busy}
                 onConfirm={remove}
                 onCancel={() => setConfirmDelete(false)}
+              />
+            )}
+
+            {confirmDuplicate && (
+              <ConfirmDialog
+                kicker={t('profile.duplicateKicker')}
+                title={t('profile.confirmDuplicateTitle', { name: character.name })}
+                body={t('profile.confirmDuplicateBody', { name: character.name })}
+                confirmLabel={t('profile.duplicate')}
+                busy={busy}
+                onConfirm={() => {
+                  setConfirmDuplicate(false);
+                  void duplicate();
+                }}
+                onCancel={() => setConfirmDuplicate(false)}
               />
             )}
           </div>
@@ -658,47 +671,44 @@ function MemoriesSection({
   memories,
   characterName,
   onDelete,
-  t,
 }: {
   memories: CharacterMemory[];
   characterName: string;
   onDelete: (id: string) => void;
-  t: TFunc;
 }) {
+  const { t } = useTranslation(['pages', 'common']);
   const [open, setOpen] = useState(true);
   return (
     <div className="card">
       <div className="section-head">
         <div className="titles">
-          <span className="kicker">{t('profile.mem.kicker')}</span>
-          <h2>{t('profile.mem.title')}</h2>
+          <span className="kicker">{t('profile.whatTheyHold')}</span>
+          <h2>{t('profile.memories')}</h2>
         </div>
         <span className="trail" />
         <span className="readout">
-          <span className="num">{memories.length}</span> {t('profile.mem.kept')}
+          <span className="num">{memories.length}</span> {t('profile.kept')}
         </span>
         {memories.length > 0 && (
           <button className="btn sm ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={15} /> {open ? t('common.hide') : t('common.show')}
+            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={15} /> {open ? t('profile.hide') : t('profile.show')}
           </button>
         )}
       </div>
       {memories.length === 0 ? (
-        <Empty icon={<Icon name="remember" size={34} />} title={t('profile.mem.emptyTitle')}>
-          <p className="muted">{t('profile.mem.emptyLede')}</p>
+        <Empty icon={<Icon name="remember" size={34} />} title={t('profile.noMemoriesTitle')}>
+          <p className="muted">{t('profile.noMemoriesBody')}</p>
         </Empty>
       ) : open ? (
         <>
-          <p className="hint" style={{ marginTop: 0 }}>{t('profile.mem.lede', { name: characterName })}</p>
-          <MemoryList memories={memories} onDelete={onDelete} t={t} />
+          <p className="hint" style={{ marginTop: 0 }}>
+            {t('profile.memoriesHint', { name: characterName })}
+          </p>
+          <MemoryList memories={memories} onDelete={onDelete} />
         </>
       ) : (
         <p className="muted" style={{ margin: 0 }}>
-          {t(memories.length === 1 ? 'profile.mem.collapsedPrefixOne' : 'profile.mem.collapsedPrefixMany', {
-            count: memories.length,
-          })}
-          <strong>{t('common.show')}</strong>
-          {t('profile.mem.collapsedSuffix')}
+          <Trans i18nKey="profile.memoriesCollapsed" ns="pages" count={memories.length} components={[<strong />]} />
         </p>
       )}
     </div>
@@ -708,21 +718,16 @@ function MemoriesSection({
 function MemoryList({
   memories,
   onDelete,
-  t,
 }: {
   memories: CharacterMemory[];
   onDelete: (id: string) => void;
-  t: TFunc;
 }) {
+  const { t } = useTranslation(['pages', 'common']);
   return (
     <div className="prof-mem-list">
       {memories.map((m) => (
         <div className="prof-mem" key={m.id}>
-          <span
-            className="prof-mem-pips"
-            title={t('profile.mem.importanceTitle', { n: m.importance })}
-            aria-label={t('profile.mem.importanceAria', { n: m.importance })}
-          >
+          <span className="prof-mem-pips" title={t('profile.importanceTitle', { n: m.importance })} aria-label={t('profile.importanceAria', { n: m.importance })}>
             {Array.from({ length: 5 }).map((_, i) => (
               <span key={i} className={`prof-pip${i < m.importance ? ' on' : ''}`} />
             ))}
@@ -732,12 +737,12 @@ function MemoryList({
             <div className="prof-mem-meta">
               <small className={`prof-mem-src${m.sourceEventId ? ' date' : ''}`}>
                 {m.sourceEventId ? (
-                  <><Icon name="date" size={12} /> {t('profile.mem.fromDate')}</>
+                  <><Icon name="date" size={12} /> {t('profile.fromDate')}</>
                 ) : (
-                  <><Icon name="edit" size={12} /> {t('profile.mem.addedManually')}</>
+                  <><Icon name="edit" size={12} /> {t('profile.addedManually')}</>
                 )}
               </small>
-              <small className="prof-mem-src">· {ago(m.createdAt, t)}</small>
+              <small className="prof-mem-src">· {relativeTime(m.createdAt)}</small>
               {m.tags.map((tag) => (
                 <span className="tag prof-mem-tag" key={tag}>
                   {tag}
@@ -745,11 +750,7 @@ function MemoryList({
               ))}
             </div>
           </div>
-          <button
-            className="btn sm danger ghost prof-mem-del"
-            onClick={() => onDelete(m.id)}
-            aria-label={t('profile.mem.deleteAria')}
-          >
+          <button className="btn sm danger ghost prof-mem-del" onClick={() => onDelete(m.id)} aria-label={t('profile.deleteMemory')}>
             <Icon name="close" size={15} />
           </button>
         </div>

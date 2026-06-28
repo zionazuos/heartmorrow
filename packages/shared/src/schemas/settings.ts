@@ -14,8 +14,10 @@ export const StructuredOutputModeSchema = z.enum([
 export type StructuredOutputMode = z.infer<typeof StructuredOutputModeSchema>;
 
 export const EndpointModeSchema = z.enum([
-  'chat_completions', // POST {baseUrl}/chat/completions  (implemented)
+  'chat_completions', // POST {baseUrl}/chat/completions — OpenAI-compatible (LM Studio /v1, Ollama, llama.cpp, vLLM)
   'responses', // POST {baseUrl}/responses  (reserved — adapter interface left open)
+  'anthropic', // POST {baseUrl}/messages — Anthropic Messages API shape (api.anthropic.com or any compatible proxy/gateway)
+  'lmstudio', // POST {baseUrl}/chat/completions on LM Studio's NATIVE REST API (baseUrl ending /api/v0) — richer model metadata + per-response stats
 ]);
 export type EndpointMode = z.infer<typeof EndpointModeSchema>;
 
@@ -30,22 +32,59 @@ export type EndpointMode = z.infer<typeof EndpointModeSchema>;
 export const ResponseLanguageSchema = z.enum(['auto', 'en', 'pt-BR']);
 export type ResponseLanguage = z.infer<typeof ResponseLanguageSchema>;
 
-export const LlmSettingsSchema = z.object({
+/**
+ * One model advertised by the endpoint's listing. `id` is always present; the
+ * remaining fields are best-effort enrichment only LM Studio's native
+ * `/api/v0/models` provides (OpenAI-compatible and Anthropic listings return
+ * just the id). The Settings model picker annotates entries with whatever is set.
+ */
+export const LlmModelInfoSchema = z.object({
+  id: z.string(),
+  /** LM Studio: is the model currently loaded into memory (vs merely downloaded)? */
+  loaded: z.boolean().optional(),
+  /** Max context window in tokens, when the endpoint reports it. */
+  contextLength: z.number().int().positive().optional(),
+  /** Quantization label (e.g. "Q4_K_M"), when reported. */
+  quantization: z.string().optional(),
+  /** Model family/role (e.g. "llm", "vlm", "embeddings"), when reported. */
+  type: z.string().optional(),
+});
+export type LlmModelInfo = z.infer<typeof LlmModelInfoSchema>;
+
+/**
+ * The fields that define HOW to reach one model on one endpoint — the wire
+ * protocol, the credentials, the model name, and every generation/decoding knob.
+ * Factored out so the base settings AND each per-role override (see
+ * {@link LlmRoleConnectionSchema}) share a single source of truth: a role override
+ * is just one of these connections plus an `enabled` flag. The GAME-level toggles
+ * (NSFW / rapport cadence / tragic outcomes) live on {@link LlmSettingsSchema} only
+ * — they are global, never per-role.
+ */
+const llmConnectionShape = {
   baseUrl: z
     .string()
     .url('Base URL must be a valid URL, e.g. http://localhost:1234/v1')
     .default('http://localhost:1234/v1'),
   apiKey: z.string().default(''),
   model: z.string().min(1, 'Model name is required').default('local-model'),
-  /**
-   * Optional vision-capable model used for image-based generation (e.g. building a
-   * character template from a portrait). Reuses the same baseUrl + apiKey. When
-   * blank, image calls fall back to `model` — so a single multimodal model needs
-   * no extra config, while text-only setups can point this at a separate VLM.
-   */
-  visionModel: z.string().default(''),
   temperature: z.number().min(0).max(2).default(0.8),
   maxTokens: z.number().int().positive().max(32_000).default(2048),
+  /**
+   * Advanced sampling knobs. Each is nullable and defaults to `null`, which means
+   * "leave it out of the request" — so the endpoint applies its own default and
+   * strict OpenAI-proper servers (which reject `top_k`/`min_p`/`repeat_penalty`)
+   * keep working unless the user opts in. When set, the server sends the matching
+   * OpenAI-compatible field (`top_p`, `top_k`, `min_p`, `frequency_penalty`,
+   * `presence_penalty`, `repeat_penalty`). Support varies by backend: top_k/min_p/
+   * repeat_penalty are honored by llama.cpp / LM Studio / Ollama / vLLM but ignored
+   * (or rejected) by the official OpenAI API.
+   */
+  topP: z.number().min(0).max(1).nullable().default(null),
+  topK: z.number().int().min(0).max(500).nullable().default(null),
+  minP: z.number().min(0).max(1).nullable().default(null),
+  frequencyPenalty: z.number().min(-2).max(2).nullable().default(null),
+  presencePenalty: z.number().min(-2).max(2).nullable().default(null),
+  repeatPenalty: z.number().min(0).max(2).nullable().default(null),
   structuredMode: StructuredOutputModeSchema.default('json_schema'),
   /**
    * When true AND structuredMode is 'json_schema', skip dumping the JSON schema
@@ -58,7 +97,86 @@ export const LlmSettingsSchema = z.object({
    */
   omitSchemaInPrompt: z.boolean().default(false),
   endpointMode: EndpointModeSchema.default('chat_completions'),
+  /**
+   * `anthropic-version` request header, only used when `endpointMode` is
+   * 'anthropic'. The Messages API requires it; bump this if you target a newer
+   * API revision. Ignored by every other endpoint mode.
+   */
+  anthropicVersion: z.string().default('2023-06-01'),
   maxRetries: z.number().int().min(0).max(10).default(3),
+} as const;
+
+/** The connection-shape keys, used to project a role override onto base settings. */
+const LLM_CONNECTION_KEYS = Object.keys(llmConnectionShape) as (keyof typeof llmConnectionShape)[];
+
+/**
+ * A per-role connection override. Same full set of connection/generation params as
+ * the base config, plus `enabled`: when false (the default) the role inherits the
+ * base config entirely; when true, ALL of these fields replace the base ones for
+ * that role's calls. This is what lets, say, the evaluator run on a small local
+ * model via LM Studio while prose runs on Anthropic — fully independent endpoints,
+ * credentials, models, and decoding params.
+ */
+export const LlmRoleConnectionSchema = z.object({
+  enabled: z.boolean().default(false),
+  ...llmConnectionShape,
+});
+export type LlmRoleConnection = z.infer<typeof LlmRoleConnectionSchema>;
+
+/**
+ * Optional per-role endpoint/model overrides. A "role" is the JOB a model call is
+ * doing: `evaluator` (the relationship judges — session eval, per-turn / text
+ * judge, DTR, gift, walkout, breakup, farewell) and `vision` (image-based
+ * generation). `prose` (everything that writes player-facing text) always uses the
+ * base config and so has no override slot. Both default to disabled, so an existing
+ * install behaves exactly as before until a role is explicitly turned on.
+ */
+export const LlmRoleOverridesSchema = z
+  .object({
+    evaluator: LlmRoleConnectionSchema.default({}),
+    vision: LlmRoleConnectionSchema.default({}),
+  })
+  .default({});
+export type LlmRoleOverrides = z.infer<typeof LlmRoleOverridesSchema>;
+
+/** The roles a model call can take. `prose` is the default (base config). */
+export type LlmRole = 'prose' | 'evaluator' | 'vision';
+
+/**
+ * Image-generation endpoint settings. Independent of the LLM connection above:
+ * this points at an AUTOMATIC1111 / Stable Diffusion WebUI compatible server and
+ * is called via its `POST {baseUrl}/sdapi/v1/txt2img` API (the same shape vLLM-style
+ * SD forks and many extensions expose). The fields below mirror that payload's
+ * common knobs, so a saved config can be dropped straight into a txt2img request.
+ * `enabled` defaults false, so an install without an SD server is unaffected.
+ */
+export const ImageGenSettingsSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    baseUrl: z
+      .string()
+      .url('Base URL must be a valid URL, e.g. http://127.0.0.1:7861')
+      .default('http://127.0.0.1:7861'),
+    negativePrompt: z.string().default('blurry, low quality, distorted'),
+    steps: z.number().int().min(1).max(150).default(20),
+    width: z.number().int().min(64).max(2048).default(1024),
+    height: z.number().int().min(64).max(2048).default(1024),
+    samplerName: z.string().min(1).default('Euler'),
+    cfgScale: z.number().min(1).max(30).default(7),
+  })
+  .default({});
+export type ImageGenSettings = z.infer<typeof ImageGenSettingsSchema>;
+
+export const LlmSettingsSchema = z.object({
+  ...llmConnectionShape,
+  /**
+   * Optional vision-capable model used for image-based generation (e.g. building a
+   * character template from a portrait) when no full `vision` role override is
+   * enabled. Reuses the base baseUrl + apiKey + endpoint. When blank, image calls
+   * fall back to `model` — so a single multimodal model needs no extra config. For
+   * a vision model on a DIFFERENT endpoint, enable `roleOverrides.vision` instead.
+   */
+  visionModel: z.string().default(''),
   /**
    * Language the model writes its replies in (dialogue, narration, texts). 'auto'
    * (default) keeps the model's own behavior of following the player; a specific
@@ -85,6 +203,12 @@ export const LlmSettingsSchema = z.object({
    * UI behind an explicit content-warning acknowledgment with crisis resources.
    */
   tragicOutcomesEnabled: z.boolean().default(false),
+  /** Optional per-role endpoint/model overrides (evaluator, vision). See
+   *  {@link LlmRoleOverridesSchema}; absent/disabled → the base config is used. */
+  roleOverrides: LlmRoleOverridesSchema,
+  /** AUTOMATIC1111 / Stable Diffusion txt2img endpoint for image generation.
+   *  Independent of the LLM connection; see {@link ImageGenSettingsSchema}. */
+  image: ImageGenSettingsSchema,
 });
 export type LlmSettings = z.infer<typeof LlmSettingsSchema>;
 
@@ -93,6 +217,42 @@ export const LlmSettingsUpdateSchema = LlmSettingsSchema.partial();
 export type LlmSettingsUpdate = z.infer<typeof LlmSettingsUpdateSchema>;
 
 export const DEFAULT_LLM_SETTINGS: LlmSettings = LlmSettingsSchema.parse({});
+
+/**
+ * Resolve the EFFECTIVE settings for a given model-call role. `prose` (and any
+ * call that doesn't specify a role) uses the base config unchanged. `evaluator`
+ * and `vision` use their full override connection when it is enabled; otherwise
+ * they fall back to the base config — with `vision` additionally honoring the
+ * legacy `visionModel` (a model-only override on the base endpoint). The returned
+ * object is a complete `LlmSettings`, so it drops straight into `getAdapter` and
+ * the structured caller. Pure: never mutates its input.
+ */
+export function resolveLlmRole(settings: LlmSettings, role: LlmRole): LlmSettings {
+  if (role === 'prose') return settings;
+  const override = settings.roleOverrides[role];
+  if (override.enabled) {
+    const connection: Partial<LlmSettings> = {};
+    for (const key of LLM_CONNECTION_KEYS) {
+      // Copy each connection/generation field off the override onto the base.
+      (connection as Record<string, unknown>)[key] = override[key];
+    }
+    return { ...settings, ...connection };
+  }
+  if (role === 'vision') {
+    return { ...settings, model: settings.visionModel.trim() || settings.model };
+  }
+  return settings;
+}
+
+/**
+ * Settings as returned to the browser: every API key (base + each role override)
+ * is blanked, with a parallel `*Set` flag so the UI can show "a key is set" without
+ * ever receiving the secret. The client echoes a blank key to keep the stored one.
+ */
+export type RedactedLlmSettings = LlmSettings & {
+  apiKeySet: boolean;
+  roleApiKeySet: Record<'evaluator' | 'vision', boolean>;
+};
 
 /** Result of a health-check / test-prompt request from the Settings UI. */
 export const LlmHealthResultSchema = z.object({

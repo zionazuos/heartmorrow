@@ -1,17 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   DATING_STAT_KEYS,
   DEFAULT_DATING_STATS,
   GUARDEDNESS_DEFAULT,
-  guardednessDescriptor,
   MIN_CHARACTER_AGE,
   RELATIONSHIP_STYLE_LABELS,
   CHARACTER_LINK_LABELS,
   GENDER_LABELS,
   SEXUALITY_LABELS,
   EXPRESSIONS,
-  EXPRESSION_LABELS,
   DAYS_OF_WEEK,
   WEATHER_KINDS,
   WEATHER_ICONS,
@@ -21,7 +20,6 @@ import {
   type Employment,
   type CharacterMemory,
   type DatingStats,
-  type Expression,
   type Gender,
   type Relationship,
   type RelationshipStyle,
@@ -31,18 +29,23 @@ import {
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
-import { useT } from '../i18n';
-import type { MessageKey } from '../i18n/locales/en';
 import {
   genderLabel,
   sexualityLabel,
-  relStyleLabel,
-  linkLabel,
+  relationshipStyleLabel,
+  characterLinkLabel,
+  weatherLabel,
   datingStatLabel,
-  weatherLabel as weatherLabelTr,
-  dayLabel,
-} from '../i18n/sharedLabels';
-import { Banner, ConfirmDialog, Field, TagInput } from '../components/ui';
+  datingStatDesc,
+  expressionLabel,
+  weekdayAbbr,
+  weekdayLabel,
+  guardednessDescriptorLabel,
+} from '../i18n/labels';
+import { Banner, Field, Modal, TagInput } from '../components/ui';
+import { DraftRestoreBar, UnsavedPill } from '../components/DraftBar';
+import { useDraft } from '../lib/useDraft';
+import { draftKey, NEW_CHAR_SCOPE } from '../lib/drafts';
 import { AssetPicker } from '../components/AssetPicker';
 import { RelationshipBars } from '../components/StatBars';
 import { Portrait } from '../components/Portrait';
@@ -133,12 +136,12 @@ const emptyForm: Form = {
 
 type TabId = 'identity' | 'personality' | 'profile' | 'relationships' | 'world';
 
-const TABS: { id: TabId; labelKey: MessageKey }[] = [
-  { id: 'identity',      labelKey: 'editor.tab.identity' },
-  { id: 'personality',   labelKey: 'editor.tab.personality' },
-  { id: 'profile',       labelKey: 'editor.tab.profile' },
-  { id: 'relationships', labelKey: 'editor.tab.relationships' },
-  { id: 'world',         labelKey: 'editor.tab.world' },
+const TABS: { id: TabId; labelKey: `characterEditor.tabs.${TabId}` }[] = [
+  { id: 'identity',      labelKey: 'characterEditor.tabs.identity' },
+  { id: 'personality',   labelKey: 'characterEditor.tabs.personality' },
+  { id: 'profile',       labelKey: 'characterEditor.tabs.profile' },
+  { id: 'relationships', labelKey: 'characterEditor.tabs.relationships' },
+  { id: 'world',         labelKey: 'characterEditor.tabs.world' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -146,13 +149,21 @@ const TABS: { id: TabId; labelKey: MessageKey }[] = [
 // ---------------------------------------------------------------------------
 
 export function CharacterEditor() {
+  const { t } = useTranslation(['pages', 'common']);
   const { id } = useParams();
   const isNew = !id;
   const nav = useNavigate();
-  const t = useT();
+  const location = useLocation();
   const { reloadAssets, activeWorldId } = useAppData();
 
   const [form, setForm] = useState<Form>(emptyForm);
+  // The saved/initial snapshot the live form is diffed against for draft
+  // persistence — set once the record (or empty new form) is loaded.
+  const [baseline, setBaseline] = useState<Form | null>(null);
+  // The id whose record is currently loaded into form/baseline. Gates draft
+  // persistence so a mid-flight id change (back/forward between two edit URLs)
+  // can't write the old record's data under the new id's key.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
   const [worlds, setWorlds] = useState<World[]>([]);
   const [allChars, setAllChars] = useState<Character[]>([]);
   const [memories, setMemories] = useState<CharacterMemory[]>([]);
@@ -168,8 +179,12 @@ export function CharacterEditor() {
   const [deletingMemoryId, setDeletingMemoryId] = useState<string | null>(null);
   const [generatingStats, setGeneratingStats] = useState(false);
   const [generatingProfile, setGeneratingProfile] = useState(false);
-  const [generatingFromImage, setGeneratingFromImage] = useState(false);
-  const [imageConfirmOpen, setImageConfirmOpen] = useState(false);
+  // Unified "Generate" flow: a modal that drafts a whole character from a portrait,
+  // pasted/uploaded reference text, or both.
+  const [generating, setGenerating] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
+  const [genText, setGenText] = useState('');
+  const [genFileName, setGenFileName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('identity');
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -204,14 +219,17 @@ export function CharacterEditor() {
     if (!id) {
       // A brand-new character defaults to the world you're playing, so it never
       // gets orphaned (a world-less character shows up in no world's roster).
-      setForm({ ...emptyForm, worldId: activeWorldId });
+      const initial = { ...emptyForm, worldId: activeWorldId };
+      setForm(initial);
+      setBaseline(initial); // a fresh form is its own clean baseline
+      setLoadedId(null);
       return;
     }
     void (async () => {
       try {
         const bundle = await api.getCharacterBundle(id);
         const c = bundle.character;
-        setForm({
+        const loaded: Form = {
           name: c.name,
           age: c.age,
           pronouns: c.pronouns,
@@ -246,7 +264,10 @@ export function CharacterEditor() {
           quirks: c.quirks,
           portraitAssetId: c.portraitAssetId,
           expressionRows: EXPRESSIONS.map((name) => ({ name, assetId: c.expressionAssets[name] ?? null })),
-        });
+        };
+        setForm(loaded);
+        setBaseline(loaded); // the saved record is the clean baseline for edits
+        setLoadedId(id); // enable draft persistence now that this id's record is in
         setMemories(bundle.memories);
         setRelationship(bundle.relationship);
       } catch (e) {
@@ -302,6 +323,44 @@ export function CharacterEditor() {
     [form],
   );
 
+  // Auto-keep unsaved work as a draft. A new character is keyed by the world
+  // it'll belong to (one in-flight new character per world); an edit is keyed by
+  // the character id. The draft is cleared the moment Save succeeds.
+  const draftScopeId = isNew ? NEW_CHAR_SCOPE(activeWorldId) : id!;
+  const draft = useDraft<Form>({
+    key: draftKey.character(draftScopeId),
+    value: form,
+    baseline,
+    // A new form has no async load; an edit is enabled only once ITS record is in
+    // (so re-keying to another id can't persist the prior record under the new key).
+    enabled: isNew || loadedId === id,
+    meta: {
+      kind: 'character',
+      scopeId: draftScopeId,
+      // Tag edits by the SAVED world, so an unsaved World-dropdown change doesn't
+      // re-file the draft under a world the character doesn't live in yet.
+      worldId: isNew ? activeWorldId : baseline?.worldId ?? form.worldId,
+      isNew,
+      label: () => form.name.trim() || t('pages:characterEditor.untitledCharacter'),
+    },
+  });
+
+  // Arriving via "Resume" from the People drafts strip means the choice to
+  // continue is already made — apply the draft immediately (before paint, so the
+  // restore bar never flashes) instead of offering it again. One-shot: consume
+  // the nav flag so a later manual revisit still shows the normal offer.
+  const resumedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (resumedRef.current) return;
+    if ((location.state as { resumeDraft?: boolean } | null)?.resumeDraft !== true) return;
+    if (!draft.found) return;
+    resumedRef.current = true;
+    const d = draft.restore();
+    if (d) setForm({ ...emptyForm, ...d });
+    nav(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.found]);
+
   const save = async () => {
     setSaving(true);
     setError(undefined);
@@ -309,10 +368,16 @@ export function CharacterEditor() {
     try {
       if (isNew) {
         const created = await api.createCharacter(payload);
+        // The current form is now the saved truth; clear the new-character draft
+        // BEFORE the key re-keys to /edit so it doesn't orphan under new__<world>.
+        setBaseline(form);
+        draft.clear();
         nav(`/characters/${created.id}/edit`);
       } else {
         await api.updateCharacter(id!, payload);
-        setSavedNote(t('editor.savedShort'));
+        setBaseline(form); // saved → the form is clean again
+        draft.clear();
+        setSavedNote(t('pages:characterEditor.saved'));
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -352,9 +417,10 @@ export function CharacterEditor() {
       });
       if (res.ok) {
         set('datingStats', res.data);
-        setSavedNote(t('editor.statsGenerated'));
+        setSavedNote(t('pages:characterEditor.statsGenerated'));
+        draft.dismissFound(); // generated content supersedes any stale restore offer
       } else {
-        setError(t('editor.statsFailed', { error: res.error }));
+        setError(t('pages:characterEditor.statGenFailed', { error: res.error }));
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -392,9 +458,10 @@ export function CharacterEditor() {
           insecurities: res.data.insecurities,
           quirks: res.data.quirks,
         }));
-        setSavedNote(t('editor.profileGenerated'));
+        setSavedNote(t('pages:characterEditor.profileGenerated'));
+        draft.dismissFound();
       } else {
-        setError(t('editor.profileFailed', { error: res.error }));
+        setError(t('pages:characterEditor.profileGenFailed', { error: res.error }));
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -403,20 +470,41 @@ export function CharacterEditor() {
     }
   };
 
-  // True when the draft already has enough content that regenerating from a photo
-  // would clobber real work — used to gate the overwrite confirmation.
+  // True when the draft already has enough content that generating would clobber
+  // real work — used to warn before overwriting.
   const hasContent = Boolean(
     form.name.trim() || form.shortDescription.trim() || form.personality.trim() || form.appearance.trim(),
   );
 
-  const runImageGeneration = async () => {
-    if (!form.portraitAssetId) return;
-    setGeneratingFromImage(true);
+  // At least one source must be present for the unified generator to run.
+  const canGenerate = Boolean(form.portraitAssetId) || genText.trim().length > 0;
+
+  // Read an uploaded file STRICTLY as UTF-8 text — its bytes are never executed or
+  // parsed as anything else (any file type is accepted but treated as plain text).
+  const MAX_SOURCE_CHARS = 40000;
+  const onPickSourceFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be re-picked later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '');
+      setGenText(text.length > MAX_SOURCE_CHARS ? text.slice(0, MAX_SOURCE_CHARS) : text);
+      setGenFileName(file.name);
+    };
+    reader.onerror = () => setError(t('pages:characterEditor.genFileError'));
+    reader.readAsText(file);
+  };
+
+  const runGeneration = async () => {
+    if (!canGenerate) return;
+    setGenerating(true);
     setError(undefined);
     setSavedNote(undefined);
     try {
-      const res = await api.generateCharacterFromImage({
+      const res = await api.generateCharacter({
         assetId: form.portraitAssetId,
+        sourceText: genText.trim().slice(0, MAX_SOURCE_CHARS),
         worldId: form.worldId,
       });
       if (res.ok) {
@@ -452,29 +540,24 @@ export function CharacterEditor() {
           datingStats: d.datingStats,
         }));
         setActiveTab('identity');
-        setSavedNote(t('editor.imageGenerated'));
+        setSavedNote(t('pages:characterEditor.characterGenerated'));
+        draft.dismissFound();
+        setGenOpen(false);
       } else {
-        setError(t('editor.imageFailed', { error: res.error }));
+        setError(t('pages:characterEditor.characterGenFailed', { error: res.error }));
       }
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setGeneratingFromImage(false);
+      setGenerating(false);
     }
-  };
-
-  // Confirm before overwriting an already-filled draft; otherwise generate now.
-  const generateFromImage = () => {
-    if (!form.portraitAssetId) return;
-    if (hasContent) setImageConfirmOpen(true);
-    else void runImageGeneration();
   };
 
   const showPreview = async () => {
     if (!id) return;
     try {
       const p = await api.promptPreview(id);
-      setPreview(`${t('editor.preview.chars', { n: p.approxChars })}\n\n${p.system}`);
+      setPreview(`~${p.approxChars} chars\n\n${p.system}`);
       setPreviewOpen(true);
     } catch (e) {
       setError(errorMessage(e));
@@ -485,13 +568,13 @@ export function CharacterEditor() {
   // needing an actual saved character record.
   const previewCharacter = useMemo(
     () => ({
-      name: form.name || t('editor.unnamed'),
+      name: form.name || t('pages:characterEditor.unnamed'),
       portraitAssetId: form.portraitAssetId,
       expressionAssets: Object.fromEntries(
         form.expressionRows.filter((r) => r.name.trim() && r.assetId).map((r) => [r.name.trim(), r.assetId as string]),
       ),
     }),
-    [form.name, form.portraitAssetId, form.expressionRows, t],
+    [form.name, form.portraitAssetId, form.expressionRows],
   );
 
   return (
@@ -502,28 +585,58 @@ export function CharacterEditor() {
       <div className="framed creator-head ce-head">
         <div className="creator-head-titles">
           <div className="creator-meta">
-            <span className="kicker">{t('editor.head.kicker')}</span>
-            <span className="creator-tool-tag">{isNew ? t('editor.tag.new') : t('editor.tag.editing')}</span>
+            <span className="kicker">{t('pages:characterEditor.workbench')}</span>
+            <span className="creator-tool-tag">
+              {isNew ? t('pages:characterEditor.tagNew') : t('pages:characterEditor.tagEditing')}
+            </span>
           </div>
-          <h1>{isNew ? t('editor.head.titleNew') : t('editor.head.titleEdit', { name: form.name || t('editor.head.charFallback') })}</h1>
-          <p>{t('editor.head.lede')}</p>
+          <h1>
+            {isNew
+              ? t('pages:characterEditor.newTitle')
+              : t('pages:characterEditor.editTitle', {
+                  name: form.name || t('pages:characterEditor.editFallback'),
+                })}
+          </h1>
+          <p>{t('pages:characterEditor.intro')}</p>
         </div>
         <div className="creator-head-actions">
           {!isNew && (
             <button className="btn ghost" onClick={showPreview}>
               <Icon name="preview" size={14} />
-              {t('editor.previewPrompt')}
+              {t('pages:characterEditor.previewPrompt')}
             </button>
           )}
+          <button className="btn ghost" onClick={() => setGenOpen(true)}>
+            <Icon name="generate" size={14} />
+            {t('pages:characterEditor.generate')}
+          </button>
+          <UnsavedPill dirty={draft.dirty} failed={draft.persistError} />
           <button className="btn primary" onClick={save} disabled={saving || !form.name.trim()}>
             <Icon name="save" size={14} />
-            {saving ? t('common.saving') : isNew ? t('editor.create') : t('editor.save')}
+            {saving
+              ? t('pages:characterEditor.saving')
+              : isNew
+                ? t('pages:characterEditor.create')
+                : t('pages:characterEditor.save')}
           </button>
         </div>
       </div>
 
       {error && <Banner kind="error">{error}</Banner>}
       {savedNote && <Banner kind="ok">{savedNote}</Banner>}
+
+      {draft.found && (
+        <DraftRestoreBar
+          env={draft.found}
+          noun={t('pages:characterEditor.noun')}
+          onRestore={() => {
+            const d = draft.restore();
+            if (d) setForm({ ...emptyForm, ...d }); // spread over defaults = forward-tolerant
+          }}
+          onDiscard={() => draft.discard()}
+          onDismiss={() => draft.dismissFound()}
+        />
+      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* Two-column canvas: side rail (portrait preview) + main form         */}
@@ -534,7 +647,7 @@ export function CharacterEditor() {
         <aside className="ce-rail">
           <div className="ce-portrait-plate framed">
             <Portrait character={previewCharacter} className="ce-portrait-img" />
-            <div className="ce-portrait-name">{form.name || <span className="ce-portrait-placeholder">{t('editor.unnamed')}</span>}</div>
+            <div className="ce-portrait-name">{form.name || <span className="ce-portrait-placeholder">{t('pages:characterEditor.unnamed')}</span>}</div>
             {form.age >= MIN_CHARACTER_AGE && (
               <div className="ce-portrait-meta">{form.age} · {form.pronouns || '—'}</div>
             )}
@@ -550,7 +663,7 @@ export function CharacterEditor() {
         <div className="ce-main stack">
 
           {/* Tab nav */}
-          <nav className="ce-tabs" aria-label={t('editor.tabsAria')}>
+          <nav className="ce-tabs" aria-label={t('pages:characterEditor.editorSectionsAria')}>
             {TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -558,7 +671,7 @@ export function CharacterEditor() {
                 className={`ce-tab ${activeTab === tab.id ? 'ce-tab-active' : ''}`}
                 onClick={() => setActiveTab(tab.id)}
               >
-                {t(tab.labelKey)}
+                {t(`pages:${tab.labelKey}`)}
               </button>
             ))}
           </nav>
@@ -571,14 +684,14 @@ export function CharacterEditor() {
               <div className="card">
                 <div className="creator-sec">
                   <span className="creator-index">01</span>
-                  <h2>{t('editor.sec.identity')}</h2>
+                  <h2>{t('pages:characterEditor.secIdentity')}</h2>
                   <span className="trail" />
                 </div>
-                <Field label={t('editor.field.name')}>
+                <Field label={t('pages:characterEditor.name')}>
                   <input value={form.name} onChange={(e) => set('name', e.target.value)} />
                 </Field>
                 <div className="inline-fields">
-                  <Field label={t('editor.field.age')} hint={t('editor.field.ageHint', { min: MIN_CHARACTER_AGE })}>
+                  <Field label={t('pages:characterEditor.age')} hint={t('pages:characterEditor.ageHint', { min: MIN_CHARACTER_AGE })}>
                     <input
                       type="number"
                       min={MIN_CHARACTER_AGE}
@@ -586,33 +699,33 @@ export function CharacterEditor() {
                       onChange={(e) => set('age', Number(e.target.value))}
                     />
                   </Field>
-                  <Field label={t('editor.field.pronouns')}>
+                  <Field label={t('pages:characterEditor.pronouns')}>
                     <input value={form.pronouns} onChange={(e) => set('pronouns', e.target.value)} />
                   </Field>
                 </div>
                 <div className="inline-fields">
-                  <Field label={t('editor.field.gender')} hint={t('editor.field.genderHint')}>
+                  <Field label={t('pages:characterEditor.gender')} hint={t('pages:characterEditor.genderHint')}>
                     <select value={form.gender} onChange={(e) => set('gender', e.target.value as Gender)}>
                       {Object.keys(GENDER_LABELS).map((k) => (
                         <option key={k} value={k}>
-                          {genderLabel(t, k)}
+                          {genderLabel(k)}
                         </option>
                       ))}
                     </select>
                   </Field>
-                  <Field label={t('editor.field.sexuality')} hint={t('editor.field.sexualityHint')}>
+                  <Field label={t('pages:characterEditor.sexuality')} hint={t('pages:characterEditor.sexualityHint')}>
                     <select value={form.sexuality} onChange={(e) => set('sexuality', e.target.value as Sexuality)}>
                       {Object.keys(SEXUALITY_LABELS).map((k) => (
                         <option key={k} value={k}>
-                          {sexualityLabel(t, k)}
+                          {sexualityLabel(k)}
                         </option>
                       ))}
                     </select>
                   </Field>
                 </div>
-                <Field label={t('editor.field.world')} hint={t('editor.field.worldHint')}>
+                <Field label={t('pages:characterEditor.world')} hint={t('pages:characterEditor.worldHint')}>
                   <select value={form.worldId ?? ''} onChange={(e) => set('worldId', e.target.value || null)}>
-                    <option value="">{t('editor.world.none')}</option>
+                    <option value="">{t('pages:characterEditor.noWorld')}</option>
                     {worlds.map((w) => (
                       <option key={w.id} value={w.id}>
                         {w.name}
@@ -620,19 +733,22 @@ export function CharacterEditor() {
                     ))}
                   </select>
                 </Field>
-                <Field label={t('editor.field.relStyle')} hint={t('editor.field.relStyleHint')}>
+                <Field
+                  label={t('pages:characterEditor.relStyle')}
+                  hint={t('pages:characterEditor.relStyleHint')}
+                >
                   <select
                     value={form.relationshipStyle}
                     onChange={(e) => set('relationshipStyle', e.target.value as RelationshipStyle)}
                   >
                     {(Object.keys(RELATIONSHIP_STYLE_LABELS) as RelationshipStyle[]).map((k) => (
                       <option key={k} value={k}>
-                        {relStyleLabel(t, k)}
+                        {relationshipStyleLabel(k)}
                       </option>
                     ))}
                   </select>
                 </Field>
-                <Field label={t('editor.field.shortDesc')}>
+                <Field label={t('pages:characterEditor.shortDesc')}>
                   <textarea value={form.shortDescription} onChange={(e) => set('shortDescription', e.target.value)} />
                 </Field>
               </div>
@@ -640,22 +756,16 @@ export function CharacterEditor() {
               <div className="card">
                 <div className="creator-sec">
                   <span className="creator-index">02</span>
-                  <h2>{t('editor.sec.portrait')}</h2>
+                  <h2>{t('pages:characterEditor.secPortrait')}</h2>
                   <span className="trail" />
                 </div>
                 <AssetPicker value={form.portraitAssetId} onChange={(v) => set('portraitAssetId', v)} />
                 <div className="ce-image-gen">
-                  <button
-                    className="btn sm primary"
-                    onClick={generateFromImage}
-                    disabled={generatingFromImage || !form.portraitAssetId}
-                  >
+                  <button className="btn sm primary" onClick={() => setGenOpen(true)}>
                     <Icon name="generate" size={13} />
-                    {generatingFromImage ? t('editor.image.reading') : t('editor.image.generate')}
+                    {t('pages:characterEditor.generate')}
                   </button>
-                  <p className="creator-note">
-                    {form.portraitAssetId ? t('editor.image.noteHas') : t('editor.image.noteEmpty')}
-                  </p>
+                  <p className="creator-note">{t('pages:characterEditor.portraitGenNote')}</p>
                 </div>
                 <div className="divider" />
                 <div
@@ -674,20 +784,22 @@ export function CharacterEditor() {
                 >
                   <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Icon name={expressionsOpen ? 'chevronDown' : 'chevronRight'} size={16} />
-                    {t('editor.expr.title')}
+                    {t('pages:characterEditor.expressions')}
                     <span className="badge" style={{ marginLeft: 6 }}>
-                      {t('editor.expr.set', { n: form.expressionRows.filter((r) => r.assetId).length })}
+                      {t('pages:characterEditor.expressionsSet', {
+                        count: form.expressionRows.filter((r) => r.assetId).length,
+                      })}
                     </span>
                   </h3>
                   <span className="trail" />
                 </div>
                 {expressionsOpen && (
                   <>
-                    <p className="creator-note">{t('editor.expr.note')}</p>
+                    <p className="creator-note">{t('pages:characterEditor.expressionsNote')}</p>
                     {form.expressionRows.map((row, i) => (
                   <div key={row.name} className="creator-subcard stack">
                     <div className="row">
-                      <strong className="flex-fill">{EXPRESSION_LABELS[row.name as Expression] ?? row.name}</strong>
+                      <strong className="flex-fill">{expressionLabel(row.name)}</strong>
                       {row.assetId && (
                         <button
                           className="btn sm danger"
@@ -698,7 +810,7 @@ export function CharacterEditor() {
                           }}
                         >
                           <Icon name="trash" size={13} />
-                          {t('editor.clear')}
+                          {t('pages:characterEditor.clear')}
                         </button>
                       )}
                     </div>
@@ -727,22 +839,22 @@ export function CharacterEditor() {
               <div className="card">
                 <div className="creator-sec">
                   <span className="creator-index">03</span>
-                  <h2>{t('editor.sec.personality')}</h2>
+                  <h2>{t('pages:characterEditor.secPersonality')}</h2>
                   <span className="trail" />
                 </div>
-                <Field label={t('editor.field.personality')}>
+                <Field label={t('pages:characterEditor.personality')}>
                   <textarea value={form.personality} onChange={(e) => set('personality', e.target.value)} />
                 </Field>
-                <Field label={t('editor.field.speechStyle')}>
+                <Field label={t('pages:characterEditor.speechStyle')}>
                   <textarea value={form.speechStyle} onChange={(e) => set('speechStyle', e.target.value)} />
                 </Field>
-                <Field label={t('editor.field.relPrefs')}>
+                <Field label={t('pages:characterEditor.relPrefs')}>
                   <textarea
                     value={form.relationshipPreferences}
                     onChange={(e) => set('relationshipPreferences', e.target.value)}
                   />
                 </Field>
-                <Field label={t('editor.field.creatorNotes')} hint={t('editor.field.creatorNotesHint')}>
+                <Field label={t('pages:characterEditor.creatorNotes')} hint={t('pages:characterEditor.creatorNotesHint')}>
                   <textarea value={form.creatorNotes} onChange={(e) => set('creatorNotes', e.target.value)} />
                 </Field>
               </div>
@@ -750,24 +862,27 @@ export function CharacterEditor() {
               <div className="card">
                 <div className="creator-sec">
                   <span className="creator-index">04</span>
-                  <h2>{t('editor.sec.traits')}</h2>
+                  <h2>{t('pages:characterEditor.secTraits')}</h2>
                   <span className="trail" />
                 </div>
-                <Field label={t('editor.field.likes')}>
+                <Field label={t('pages:characterEditor.likes')}>
                   <TagInput value={form.likes} onChange={(v) => set('likes', v)} />
                 </Field>
-                <Field label={t('editor.field.dislikes')}>
+                <Field label={t('pages:characterEditor.dislikes')}>
                   <TagInput value={form.dislikes} onChange={(v) => set('dislikes', v)} />
                 </Field>
-                <Field label={t('editor.field.goals')}>
+                <Field label={t('pages:characterEditor.goals')}>
                   <TagInput value={form.goals} onChange={(v) => set('goals', v)} />
                 </Field>
-                <Field label={t('editor.field.boundaries')}>
+                <Field label={t('pages:characterEditor.boundaries')}>
                   <TagInput value={form.boundaries} onChange={(v) => set('boundaries', v)} />
                 </Field>
                 <Field
-                  label={t('editor.field.guardedness', { value: form.guardedness, descriptor: guardednessDescriptor(form.guardedness) })}
-                  hint={t('editor.field.guardednessHint')}
+                  label={t('pages:characterEditor.guardedness', {
+                    value: form.guardedness,
+                    descriptor: guardednessDescriptorLabel(form.guardedness),
+                  })}
+                  hint={t('pages:characterEditor.guardednessHint')}
                 >
                   <input
                     type="range"
@@ -777,8 +892,8 @@ export function CharacterEditor() {
                     onChange={(e) => set('guardedness', Number(e.target.value))}
                   />
                   <div className="ce-range-ends">
-                    <span>{t('editor.guard.openBook')}</span>
-                    <span>{t('editor.guard.walledOff')}</span>
+                    <span>{t('pages:characterEditor.openBook')}</span>
+                    <span>{t('pages:characterEditor.walledOff')}</span>
                   </div>
                 </Field>
               </div>
@@ -788,10 +903,10 @@ export function CharacterEditor() {
             <div className="card">
               <div className="creator-sec">
                 <span className="creator-index">09</span>
-                <h2>{t('editor.sec.weather')}</h2>
+                <h2>{t('pages:characterEditor.secWeather')}</h2>
                 <span className="trail" />
               </div>
-              <p className="creator-note">{t('editor.weather.note')}</p>
+              <p className="creator-note">{t('pages:characterEditor.weatherNote')}</p>
               <div className="weather-pref-grid">
                 {WEATHER_KINDS.map((k) => {
                   const fav = form.favoriteWeather.includes(k);
@@ -799,19 +914,19 @@ export function CharacterEditor() {
                   return (
                     <div className="weather-pref" key={k}>
                       <span className="flex-fill">
-                        {WEATHER_ICONS[k]} {weatherLabelTr(t, k)}
+                        {WEATHER_ICONS[k]} {weatherLabel(k)}
                       </span>
                       <button
                         className={`btn sm ${fav ? 'primary' : 'ghost'}`}
                         onClick={() => toggleWeather(k, 'fav')}
-                        title={t('editor.weather.lovesTitle')}
+                        title={t('pages:characterEditor.lovesWeather')}
                       >
                         ♥
                       </button>
                       <button
                         className={`btn sm ${dis ? 'danger' : 'ghost'}`}
                         onClick={() => toggleWeather(k, 'dis')}
-                        title={t('editor.weather.dislikesTitle')}
+                        title={t('pages:characterEditor.dislikesWeather')}
                       >
                         ✕
                       </button>
@@ -830,7 +945,7 @@ export function CharacterEditor() {
               <div className="card">
                 <div className="creator-sec">
                   <span className="creator-index">05</span>
-                  <h2>{t('editor.sec.profile')}</h2>
+                  <h2>{t('pages:characterEditor.secProfile')}</h2>
                   <span className="trail" />
                   <button
                     className="btn sm creator-sec-action"
@@ -838,22 +953,26 @@ export function CharacterEditor() {
                     disabled={generatingProfile || !form.name.trim()}
                   >
                     <Icon name="generate" size={13} />
-                    {generatingProfile ? t('editor.generating') : t('editor.generateFromDesc')}
+                    {generatingProfile
+                      ? t('pages:characterEditor.generating')
+                      : t('pages:characterEditor.genFromDesc')}
                   </button>
                 </div>
                 <p className="creator-note">
-                  {t('editor.profile.note', { name: form.name || t('editor.thisCharacter') })}
+                  {t('pages:characterEditor.profileNote', {
+                    name: form.name || t('pages:characterEditor.thisCharacter'),
+                  })}
                 </p>
-                <Field label={t('editor.field.appearance')}>
+                <Field label={t('pages:characterEditor.appearance')}>
                   <textarea value={form.appearance} onChange={(e) => set('appearance', e.target.value)} />
                 </Field>
-                <Field label={t('editor.field.textingStyle')} hint={t('editor.field.textingStyleHint')}>
+                <Field label={t('pages:characterEditor.textingStyle')} hint={t('pages:characterEditor.textingStyleHint')}>
                   <textarea value={form.textingStyle} onChange={(e) => set('textingStyle', e.target.value)} />
                 </Field>
-                <Field label={t('editor.field.onlinePersona')} hint={t('editor.field.onlinePersonaHint')}>
+                <Field label={t('pages:characterEditor.onlinePersona')} hint={t('pages:characterEditor.onlinePersonaHint')}>
                   <textarea value={form.onlinePersona} onChange={(e) => set('onlinePersona', e.target.value)} />
                 </Field>
-                <Field label={t('editor.field.loveLanguage')}>
+                <Field label={t('pages:characterEditor.loveLanguage')}>
                   <input value={form.loveLanguage} onChange={(e) => set('loveLanguage', e.target.value)} />
                 </Field>
               </div>
@@ -861,23 +980,23 @@ export function CharacterEditor() {
               <div className="card">
                 <div className="creator-sec">
                   <span className="creator-index">06</span>
-                  <h2>{t('editor.sec.chemistry')}</h2>
+                  <h2>{t('pages:characterEditor.secChemistry')}</h2>
                   <span className="trail" />
                 </div>
-                <p className="creator-note">{t('editor.chem.note')}</p>
-                <Field label={t('editor.field.physicalNeeds')}>
+                <p className="creator-note">{t('pages:characterEditor.chemistryNote')}</p>
+                <Field label={t('pages:characterEditor.physicalNeeds')}>
                   <TagInput value={form.physicalNeeds} onChange={(v) => set('physicalNeeds', v)} />
                 </Field>
-                <Field label={t('editor.field.physicalDesires')}>
+                <Field label={t('pages:characterEditor.physicalDesires')}>
                   <TagInput value={form.physicalDesires} onChange={(v) => set('physicalDesires', v)} />
                 </Field>
-                <Field label={t('editor.field.physicalDislikes')}>
+                <Field label={t('pages:characterEditor.physicalDislikes')}>
                   <TagInput value={form.physicalDislikes} onChange={(v) => set('physicalDislikes', v)} />
                 </Field>
-                <Field label={t('editor.field.insecurities')}>
+                <Field label={t('pages:characterEditor.insecurities')}>
                   <TagInput value={form.insecurities} onChange={(v) => set('insecurities', v)} />
                 </Field>
-                <Field label={t('editor.field.quirks')}>
+                <Field label={t('pages:characterEditor.quirks')}>
                   <TagInput value={form.quirks} onChange={(v) => set('quirks', v)} />
                 </Field>
               </div>
@@ -887,7 +1006,7 @@ export function CharacterEditor() {
             <div className="card">
               <div className="creator-sec">
                 <span className="creator-index">10</span>
-                <h2>{t('editor.sec.datingStats')}</h2>
+                <h2>{t('pages:characterEditor.secBaseStats')}</h2>
                 <span className="trail" />
                 <button
                   className="btn sm creator-sec-action"
@@ -895,11 +1014,21 @@ export function CharacterEditor() {
                   disabled={generatingStats || !form.name.trim()}
                 >
                   <Icon name="generate" size={13} />
-                  {generatingStats ? t('editor.generating') : t('editor.generateFromDesc')}
+                  {generatingStats
+                    ? t('pages:characterEditor.generating')
+                    : t('pages:characterEditor.genFromDesc')}
                 </button>
               </div>
+              <p className="creator-note">{t('pages:characterEditor.baseStatsNote')}</p>
               {DATING_STAT_KEYS.map((k) => (
-                <Field key={k} label={t('editor.statLine', { label: datingStatLabel(t, k), value: form.datingStats[k] })}>
+                <Field
+                  key={k}
+                  label={t('pages:characterEditor.statLabel', {
+                    label: datingStatLabel(k),
+                    value: form.datingStats[k],
+                  })}
+                  hint={datingStatDesc(k)}
+                >
                   <input
                     type="range"
                     min={0}
@@ -919,10 +1048,14 @@ export function CharacterEditor() {
             <div className="card">
               <div className="creator-sec">
                 <span className="creator-index">07</span>
-                <h2>{t('editor.sec.connections')}</h2>
+                <h2>{t('pages:characterEditor.secConnections')}</h2>
                 <span className="trail" />
               </div>
-              <p className="creator-note">{t('editor.conn.note', { name: form.name || t('editor.thisCharacter') })}</p>
+              <p className="creator-note">
+                {t('pages:characterEditor.connectionsNote', {
+                  name: form.name || t('pages:characterEditor.thisCharacter'),
+                })}
+              </p>
               {form.links.map((link, i) => (
                 <div className="ce-link-row" key={i}>
                   <select
@@ -934,7 +1067,7 @@ export function CharacterEditor() {
                       set('links', links);
                     }}
                   >
-                    <option value="">{t('editor.conn.charPlaceholder')}</option>
+                    <option value="">{t('pages:characterEditor.selectCharacter')}</option>
                     {allChars
                       // Only this character's OWN world — connections never cross worlds.
                       .filter((c) => c.id !== id && c.worldId === form.worldId)
@@ -954,7 +1087,7 @@ export function CharacterEditor() {
                   >
                     {(Object.keys(CHARACTER_LINK_LABELS) as CharacterLinkKind[]).map((k) => (
                       <option key={k} value={k}>
-                        {linkLabel(t, k)}
+                        {characterLinkLabel(k)}
                       </option>
                     ))}
                   </select>
@@ -971,7 +1104,7 @@ export function CharacterEditor() {
                 onClick={() => set('links', [...form.links, { targetId: '', kind: 'friend' }])}
               >
                 <Icon name="plus" size={13} />
-                {t('editor.conn.add')}
+                {t('pages:characterEditor.addConnection')}
               </button>
               <label className="ce-excanoize-label">
                 <input
@@ -980,8 +1113,10 @@ export function CharacterEditor() {
                   onChange={(e) => set('allowsExCanonization', e.target.checked)}
                 />
                 <span className="creator-note ce-excanoize-body">
-                  <strong>{t('editor.excanon.strong')}</strong>
-                  {t('editor.excanon.body', { name: form.name || t('editor.thisCharacter') })}
+                  <strong>{t('pages:characterEditor.exCanonStrong')}</strong>
+                  {t('pages:characterEditor.exCanonBody', {
+                    name: form.name || t('pages:characterEditor.thisCharacter'),
+                  })}
                 </span>
               </label>
             </div>
@@ -990,13 +1125,13 @@ export function CharacterEditor() {
             <div className="card">
               <div className="creator-sec">
                 <span className="creator-index">11</span>
-                <h2>{t('editor.sec.relationship')}</h2>
+                <h2>{t('pages:characterEditor.secRelationship')}</h2>
                 <span className="trail" />
               </div>
               {relationship ? (
                 <RelationshipBars relationship={relationship} />
               ) : (
-                <p className="muted">{t('editor.rel.afterCreate')}</p>
+                <p className="muted">{t('pages:characterEditor.relStatsLater')}</p>
               )}
             </div>
 
@@ -1004,24 +1139,24 @@ export function CharacterEditor() {
             <div className="card">
               <div className="creator-sec">
                 <span className="creator-index">12</span>
-                <h2>{t('editor.sec.memories')}</h2>
+                <h2>{t('pages:characterEditor.secMemories')}</h2>
                 <span className="trail" />
               </div>
               {isNew ? (
-                <p className="muted">{t('editor.mem.saveFirst')}</p>
+                <p className="muted">{t('pages:characterEditor.memoriesSaveFirst')}</p>
               ) : (
                 <>
                   <div className="row" style={{ alignItems: 'flex-end' }}>
                     <div className="flex-fill">
-                      <Field label={t('editor.mem.add')}>
+                      <Field label={t('pages:characterEditor.addMemory')}>
                         <input
                           value={newMemory.text}
-                          placeholder={t('editor.mem.placeholder')}
+                          placeholder={t('pages:characterEditor.memoryPlaceholder')}
                           onChange={(e) => setNewMemory((m) => ({ ...m, text: e.target.value }))}
                         />
                       </Field>
                     </div>
-                    <Field label={t('editor.mem.importance')}>
+                    <Field label={t('pages:characterEditor.importance')}>
                       <select
                         value={newMemory.importance}
                         onChange={(e) => setNewMemory((m) => ({ ...m, importance: Number(e.target.value) }))}
@@ -1034,11 +1169,11 @@ export function CharacterEditor() {
                       </select>
                     </Field>
                     <button className="btn" onClick={addMemory} disabled={addingMemory || !newMemory.text.trim()}>
-                      {addingMemory ? t('editor.mem.adding') : t('editor.mem.addBtn')}
+                      {addingMemory ? t('pages:characterEditor.adding') : t('pages:characterEditor.add')}
                     </button>
                   </div>
                   {memories.length === 0 ? (
-                    <p className="muted">{t('editor.mem.none')}</p>
+                    <p className="muted">{t('pages:characterEditor.noMemories')}</p>
                   ) : (
                     memories.map((m) => (
                       <div className="list-item" key={m.id}>
@@ -1060,7 +1195,7 @@ export function CharacterEditor() {
                             }
                           }}
                         >
-                          {deletingMemoryId === m.id ? t('editor.mem.deleting') : t('common.delete')}
+                          {deletingMemoryId === m.id ? t('pages:characterEditor.deleting') : t('pages:characterEditor.delete')}
                         </button>
                       </div>
                     ))
@@ -1077,39 +1212,43 @@ export function CharacterEditor() {
             <div className="card">
               <div className="creator-sec">
                 <span className="creator-index">08</span>
-                <h2>{t('editor.sec.employment')}</h2>
+                <h2>{t('pages:characterEditor.secEmployment')}</h2>
                 <span className="trail" />
               </div>
-              <p className="creator-note">{t('editor.emp.note', { name: form.name || t('editor.thisCharacter') })}</p>
+              <p className="creator-note">
+                {t('pages:characterEditor.employmentNote', {
+                  name: form.name || t('pages:characterEditor.thisCharacter'),
+                })}
+              </p>
               <label className="ce-employed-toggle">
                 <input
                   type="checkbox"
                   checked={form.employment != null}
                   onChange={(e) => set('employment', e.target.checked ? { ...DEFAULT_JOB } : null)}
                 />
-                <span>{t('editor.emp.employed')}</span>
+                <span>{t('pages:characterEditor.employed')}</span>
               </label>
               {form.employment && (
                 <>
                   <div className="inline-fields">
-                    <Field label={t('editor.emp.jobTitle')}>
+                    <Field label={t('pages:characterEditor.jobTitle')}>
                       <input value={form.employment.title} onChange={(e) => patchEmp({ title: e.target.value })} />
                     </Field>
-                    <Field label={t('editor.emp.workplace')} hint={t('editor.emp.workplaceHint')}>
+                    <Field label={t('pages:characterEditor.workplace')} hint={t('pages:characterEditor.workplaceHint')}>
                       <input value={form.employment.place} onChange={(e) => patchEmp({ place: e.target.value })} />
                     </Field>
                   </div>
-                  <Field label={t('editor.emp.shift')}>
+                  <Field label={t('pages:characterEditor.shift')}>
                     <select
                       value={form.employment.shiftPhase}
                       onChange={(e) => patchEmp({ shiftPhase: e.target.value as Employment['shiftPhase'] })}
                     >
-                      <option value="morning">{t('editor.emp.shiftMorning')}</option>
-                      <option value="afternoon">{t('editor.emp.shiftAfternoon')}</option>
-                      <option value="evening">{t('editor.emp.shiftEvening')}</option>
+                      <option value="morning">{t('pages:characterEditor.shiftMorning')}</option>
+                      <option value="afternoon">{t('pages:characterEditor.shiftAfternoon')}</option>
+                      <option value="evening">{t('pages:characterEditor.shiftEvening')}</option>
                     </select>
                   </Field>
-                  <Field label={t('editor.emp.workdays')}>
+                  <Field label={t('pages:characterEditor.workdays')}>
                     <div className="ce-workdays">
                       {DAYS_OF_WEEK.map((d, idx) => (
                         <button
@@ -1117,9 +1256,9 @@ export function CharacterEditor() {
                           type="button"
                           className={`btn sm ${form.employment!.workdays.includes(idx) ? 'primary' : 'ghost'}`}
                           onClick={() => toggleWorkday(idx)}
-                          title={dayLabel(t, d)}
+                          title={weekdayLabel(d)}
                         >
-                          {dayLabel(t, d).slice(0, 3)}
+                          {weekdayAbbr(d)}
                         </button>
                       ))}
                     </div>
@@ -1139,14 +1278,14 @@ export function CharacterEditor() {
         <details className="card ce-prompt-details" open>
           <summary className="ce-prompt-summary">
             <div className="creator-sec" style={{ margin: 0, flex: 1 }}>
-              <span className="kicker">{t('editor.preview.kicker')}</span>
+              <span className="kicker">{t('pages:characterEditor.assembledPrompt')}</span>
               <span className="trail" />
               <button
                 className="btn sm ghost creator-sec-action"
                 onClick={() => setPreviewOpen(false)}
               >
                 <Icon name="close" size={13} />
-                {t('common.close')}
+                {t('pages:characterEditor.close')}
               </button>
             </div>
           </summary>
@@ -1154,20 +1293,62 @@ export function CharacterEditor() {
         </details>
       )}
 
-      {imageConfirmOpen && (
-        <ConfirmDialog
-          title={t('editor.imageConfirm.title')}
-          kicker={t('editor.imageConfirm.kicker')}
-          confirmLabel={generatingFromImage ? t('editor.generating') : t('editor.imageConfirm.overwrite')}
-          danger
-          busy={generatingFromImage}
-          body={t('editor.imageConfirm.body')}
-          onCancel={() => setImageConfirmOpen(false)}
-          onConfirm={async () => {
-            await runImageGeneration();
-            setImageConfirmOpen(false);
-          }}
-        />
+      {genOpen && (
+        <Modal onClose={() => !generating && setGenOpen(false)}>
+          <div className="kicker">{t('pages:characterEditor.genKicker')}</div>
+          <h2 style={{ marginTop: 0 }}>{t('pages:characterEditor.genTitle')}</h2>
+          <p className="hint">{t('pages:characterEditor.genIntro')}</p>
+
+          <div className="stack" style={{ gap: 14 }}>
+            <Field label={t('pages:characterEditor.genPortrait')} hint={t('pages:characterEditor.genPortraitHint')}>
+              <AssetPicker value={form.portraitAssetId} onChange={(v) => set('portraitAssetId', v)} />
+            </Field>
+
+            <Field label={t('pages:characterEditor.genText')} hint={t('pages:characterEditor.genTextHint')}>
+              <textarea
+                value={genText}
+                rows={8}
+                placeholder={t('pages:characterEditor.genTextPlaceholder')}
+                onChange={(e) => {
+                  setGenText(e.target.value.slice(0, MAX_SOURCE_CHARS));
+                  setGenFileName(null);
+                }}
+              />
+              <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                <label className="btn sm ghost" style={{ cursor: 'pointer', margin: 0 }}>
+                  <Icon name="upload" size={13} />
+                  {t('pages:characterEditor.genUpload')}
+                  <input type="file" style={{ display: 'none' }} onChange={onPickSourceFile} />
+                </label>
+                {genFileName && <span className="hint">{genFileName}</span>}
+                {genText && (
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    onClick={() => {
+                      setGenText('');
+                      setGenFileName(null);
+                    }}
+                  >
+                    {t('pages:characterEditor.genClearText')}
+                  </button>
+                )}
+              </div>
+            </Field>
+
+            {hasContent && <Banner kind="info">{t('pages:characterEditor.genOverwriteWarn')}</Banner>}
+          </div>
+
+          <div className="row end" style={{ flexWrap: 'wrap', marginTop: 16 }}>
+            <button className="btn ghost" onClick={() => setGenOpen(false)} disabled={generating}>
+              {t('common:cancel')}
+            </button>
+            <button className="btn primary" onClick={runGeneration} disabled={generating || !canGenerate} autoFocus>
+              <Icon name="generate" size={14} />
+              {generating ? t('pages:characterEditor.generating') : t('pages:characterEditor.genRun')}
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );

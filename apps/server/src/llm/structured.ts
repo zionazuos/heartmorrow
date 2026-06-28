@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { LlmSettings, StructuredResult } from '@dsim/shared';
+import { resolveLlmRole, type LlmRole, type LlmSettings, type StructuredResult } from '@dsim/shared';
 import { parseJsonStrict, JsonParseError } from '../lib/json';
 import { getAdapter } from './provider';
-import type { ChatAdapter, ChatMessage, ResponseFormat } from './types';
+import type { ChatAdapter, ChatMessage, GenerationStats, ResponseFormat, TokenUsage } from './types';
 
 /**
  * Central structured-output caller. This is the ONLY way game-state-affecting
@@ -25,6 +25,13 @@ import type { ChatAdapter, ChatMessage, ResponseFormat } from './types';
 
 export interface StructuredCallOptions {
   settings: LlmSettings;
+  /**
+   * Which model-call role this is, so the right per-role endpoint/model override
+   * applies (see `resolveLlmRole`). The relationship JUDGES pass 'evaluator';
+   * everything else writes prose and uses the default. Ignored when `adapter` is
+   * injected (tests bypass routing).
+   */
+  role?: LlmRole;
   /** Human description of the task, embedded in repair prompts for context. */
   task: string;
   /** Name used for the JSON schema (json_schema mode). */
@@ -36,17 +43,75 @@ export interface StructuredCallOptions {
   /** Override the output token budget (defaults to settings.maxTokens). Needed
    * for tasks whose schema permits long output (e.g. the chronicle fold). */
   maxTokens?: number;
+  /** Floor for the output token budget: the effective maxTokens is raised to at
+   * least this when `maxTokens` isn't given an absolute override. Unlike `maxTokens`
+   * it respects the (possibly per-role) configured budget, only lifting it if the
+   * user set it lower than a task needs (e.g. the session evaluator). */
+  minMaxTokens?: number;
   /** Inject an adapter (used by tests). Defaults to one built from settings. */
   adapter?: ChatAdapter;
   signal?: AbortSignal;
   /** Optional logger for retry diagnostics. */
   log?: (message: string) => void;
+  /**
+   * Optional per-attempt telemetry hook (used by the Heartmorrow Bench). Fires once
+   * for EVERY model call this function makes — including retries and response-format
+   * downgrades — with the round-trip latency, the endpoint's reported usage (when
+   * any), and the prompt/completion character counts. Purely observational: it never
+   * affects control flow. Production callers omit it.
+   */
+  onAttempt?: (info: {
+    /** 1-based index of this model call within the structured call. */
+    call: number;
+    latencyMs: number;
+    usage?: TokenUsage;
+    /** Endpoint-reported generation stats (real decode tok/sec + generation time),
+     *  when the server provides them (e.g. LM Studio's native API). The bench uses
+     *  these for accurate tok/sec instead of the end-to-end-latency estimate. */
+    stats?: GenerationStats;
+    /** Transport-level success (the call returned content, before parse/validation). */
+    ok: boolean;
+    promptChars: number;
+    completionChars: number;
+  }) => void;
+}
+
+/** Total characters across a message list (text parts only; image data excluded). */
+function messagesChars(messages: ChatMessage[]): number {
+  return messages.reduce((n, m) => {
+    if (typeof m.content === 'string') return n + m.content.length;
+    return n + m.content.reduce((a, p) => a + (p.type === 'text' ? p.text.length : 0), 0);
+  }, 0);
 }
 
 function formatZodError(err: z.ZodError): string {
   return err.issues
     .map((i) => `- ${i.path.length ? i.path.join('.') : '(root)'}: ${i.message}`)
     .join('\n');
+}
+
+/**
+ * Deep-clone a JSON-schema tree with every `maxLength` constraint removed.
+ *
+ * In `json_schema` mode the schema becomes a GRAMMAR that constrains decoding, and a
+ * `maxLength` there is a HARD cap: the server stops the string at exactly N characters
+ * and closes the quote — truncating fields mid-word ("…video streams or v"). We strip
+ * it so the model writes the field out in full. The Zod schema's `.max()` is untouched
+ * and still VALIDATES the result, so a genuinely runaway/looping output that overruns
+ * the (generous) limit is rejected and retried rather than silently truncated. The
+ * cap is kept in the PROMPT copy of the schema as a soft size hint (see `schemaText`).
+ */
+function stripMaxLength(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(stripMaxLength);
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k === 'maxLength') continue;
+      out[k] = stripMaxLength(v);
+    }
+    return out;
+  }
+  return node;
 }
 
 function buildResponseFormat(
@@ -85,9 +150,12 @@ function buildModeChain(start: LlmSettings['structuredMode']): LlmSettings['stru
   }
 }
 
-/** Heuristic: did the server reject the request specifically over response_format? */
+/** Heuristic: did the server reject the request specifically over the structured
+ * -output directive? Covers the OpenAI `response_format` field and Anthropic's
+ * `output_config` / schema, so an unsupported grammar downgrades the mode chain
+ * (json_schema → json_object → prompt_only) instead of failing outright. */
 function isResponseFormatError(message: string): boolean {
-  return /response[_ ]?format/i.test(message);
+  return /response[_ ]?format|output[_ ]?config|json[_ ]?schema/i.test(message);
 }
 
 /**
@@ -124,30 +192,45 @@ export async function callStructuredLlm<S extends z.ZodTypeAny>(
   messages: ChatMessage[],
   options: StructuredCallOptions,
 ): Promise<StructuredResult<z.output<S>>> {
-  const { settings, task } = options;
+  const { task } = options;
+  // Resolve the effective connection for this role (endpoint/model/decoding). An
+  // injected adapter (tests) bypasses routing, so the base config still drives the
+  // non-transport knobs there. Every reference below is to the RESOLVED settings.
+  const settings = options.adapter ? options.settings : resolveLlmRole(options.settings, options.role ?? 'prose');
   const schemaName = options.schemaName ?? 'Result';
   const maxRetries = options.maxRetries ?? settings.maxRetries;
   const baseTemp = options.baseTemperature ?? settings.temperature;
+  const maxTokens = options.maxTokens ?? Math.max(settings.maxTokens, options.minMaxTokens ?? 0);
   const adapter = options.adapter ?? getAdapter(settings);
 
   const jsonSchema = zodToJsonSchema(schema, { name: schemaName, $refStrategy: 'none' });
   const schemaText = JSON.stringify(jsonSchema, null, 2);
+  // The GRAMMAR (json_schema mode) drops `maxLength` so strings are never hard-cut
+  // mid-word; validation against the Zod `.max()` still rejects a true runaway.
+  const grammarJsonSchema = stripMaxLength(jsonSchema);
 
   // Adaptive structured-output mode: start from the configured mode and
   // downgrade if the server rejects the response_format.
   const modeChain = buildModeChain(settings.structuredMode);
+  const requestedMode = modeChain[0]!;
   let modeIdx = 0;
   let formatFallbacks = 0;
   const maxFormatFallbacks = modeChain.length - 1;
 
   let lastError = 'No attempts were made.';
   let lastRaw: string | undefined;
+  let callIndex = 0; // counts every model call (incl. retries + format downgrades)
 
   const totalAttempts = maxRetries + 1; // 1 initial call + N retries
   let attempt = 0;
   while (attempt < totalAttempts) {
+    // Stop before each call if the caller aborted (e.g. the bench user hit Cancel) —
+    // works even for adapters that don't propagate the signal to their transport.
+    if (options.signal?.aborted) {
+      return { ok: false, error: 'Aborted.', attempts: attempt, lastRaw, requestedMode, finalMode: modeChain[modeIdx]! };
+    }
     const mode = modeChain[modeIdx]!;
-    const responseFormat = buildResponseFormat(mode, schemaName, jsonSchema);
+    const responseFormat = buildResponseFormat(mode, schemaName, grammarJsonSchema);
     const temperature = Math.max(0, baseTemp - attempt * 0.2);
 
     // Built per attempt because the mode can downgrade across retries (and the
@@ -169,15 +252,39 @@ export async function callStructuredLlm<S extends z.ZodTypeAny>(
     }
 
     let content: string;
+    callIndex += 1;
+    const callStarted = Date.now();
     try {
       const result = await adapter.chat(
-        { messages: attemptMessages, temperature, maxTokens: options.maxTokens ?? settings.maxTokens, responseFormat },
+        { messages: attemptMessages, temperature, maxTokens, responseFormat },
         options.signal,
       );
       content = result.content;
       lastRaw = content;
+      options.onAttempt?.({
+        call: callIndex,
+        latencyMs: Date.now() - callStarted,
+        usage: result.usage,
+        stats: result.stats,
+        ok: true,
+        promptChars: messagesChars(attemptMessages),
+        completionChars: content.length,
+      });
     } catch (err) {
+      options.onAttempt?.({
+        call: callIndex,
+        latencyMs: Date.now() - callStarted,
+        usage: undefined,
+        ok: false,
+        promptChars: messagesChars(attemptMessages),
+        completionChars: 0,
+      });
       const message = (err as Error).message;
+      // If the caller aborted (e.g. the bench user hit Cancel / disconnected),
+      // stop immediately rather than spending the remaining retry budget.
+      if (options.signal?.aborted || (err as Error).name === 'AbortError') {
+        return { ok: false, error: `Aborted: ${message}`, attempts: attempt + 1, lastRaw, requestedMode, finalMode: modeChain[modeIdx]! };
+      }
       lastError = `Transport error: ${message}`;
       // A transport failure produced no model reply — clear any stale reply from an
       // earlier attempt so the repair prompt shows "(none / not valid JSON)" rather
@@ -212,7 +319,7 @@ export async function callStructuredLlm<S extends z.ZodTypeAny>(
 
     const validation = schema.safeParse(parsed);
     if (validation.success) {
-      return { ok: true, data: validation.data, attempts: attempt + 1 };
+      return { ok: true, data: validation.data, attempts: attempt + 1, requestedMode, finalMode: modeChain[modeIdx]! };
     }
     lastError = formatZodError(validation.error);
     options.log?.(`[structured:${schemaName}] attempt ${attempt + 1}/${totalAttempts} validation failed:\n${lastError}`);
@@ -221,8 +328,10 @@ export async function callStructuredLlm<S extends z.ZodTypeAny>(
 
   return {
     ok: false,
-    error: `Structured output failed after ${totalAttempts} attempt(s). Last error:\n${lastError}`,
+    error: `The model couldn’t produce a valid response after ${totalAttempts} attempt(s).\n${lastError}`,
     attempts: totalAttempts,
     lastRaw,
+    requestedMode,
+    finalMode: modeChain[modeIdx]!,
   };
 }

@@ -10,10 +10,23 @@
    =========================================================================== */
 
 /* --- Main page: section scaffolding -------------------------------------- */
-.set-page { gap: 18px; max-width: 860px; margin-inline: auto; }
+.set-page { gap: 30px; max-width: 860px; margin-inline: auto; }
 /* On very large monitors give the technical settings (form rows + console)
    a touch more room; kept modest so line length stays readable. */
 @media (min-width: 1900px) { .set-page { max-width: 1040px; } }
+
+/* Group dividers — cluster the framed sections under mono brass headers so the
+   page reads as a few labelled groups rather than one undifferentiated stack. */
+.set-group { display: flex; flex-direction: column; gap: 16px; }
+.set-group-head {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 2px; padding: 0 2px;
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--brass);
+}
+.set-group-head::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--border-bright), transparent);
+}
 
 /* A labelled section block. Quieter than .card so the one framed console
    below carries the boldness. */
@@ -23,6 +36,20 @@
 
 /* Mode + adult-content toggles as a tidy choice row. */
 .set-choice { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* --- Appearance: accent swatches (main page) ----------------------------- */
+/* The language select sits in a normal Field; the accent picker gets the
+   gem-swatch treatment, fenced under its own mono sub-label. */
+.set-accent { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.set-accent .hint { margin-bottom: 12px; font-size: 0.82rem; }
+.set-accent-custom {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin-top: 14px; font-size: 0.84rem; color: var(--text-dim); cursor: pointer;
+}
+.set-accent-custom input[type="color"] {
+  width: 44px; height: 30px; padding: 0; border-radius: var(--radius-sm);
+  cursor: pointer; flex: none;
+}
 .set-status-line {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
   margin: 12px 0 0;
@@ -49,6 +76,35 @@
   font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--text-mute);
 }
+/* Role tabs: Main / Judge / Vision, one connection per tab. */
+.set-tabs {
+  display: flex; gap: 4px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.set-tab {
+  position: relative; appearance: none; background: none; border: none; cursor: pointer;
+  padding: 9px 14px; margin-bottom: -1px;
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-mute);
+  border-bottom: 2px solid transparent;
+}
+.set-tab:hover { color: var(--text); }
+.set-tab.active { color: var(--brass); border-bottom-color: var(--brass); }
+.set-tab-dot {
+  display: inline-block; width: 6px; height: 6px; margin-left: 7px; border-radius: 50%;
+  vertical-align: middle; background: var(--brass); box-shadow: 0 0 7px rgba(230, 177, 94, 0.7);
+}
+/* The role's blurb + enable toggle, above that role's connection fields. */
+.set-role-bar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.set-role-toggle {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-mute); white-space: nowrap;
+}
+.set-role-toggle input { cursor: pointer; }
 .set-console-dot::before {
   content: ''; width: 8px; height: 8px; border-radius: 50%;
   background: var(--brass); box-shadow: 0 0 9px rgba(230, 177, 94, 0.7);
@@ -81,6 +137,60 @@
   background: linear-gradient(90deg, var(--border-bright), transparent);
 }
 
+/* --- Provider selector (endpoint mode) ----------------------------------- */
+/* The prominent banner above the two columns: picking a provider here is the
+   first move, so it's a row of selectable chips, not a buried <select>. */
+.set-provider { margin-bottom: 20px; }
+.set-provider .set-col-label { margin-bottom: 10px; }
+.set-provider-seg {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.set-provider-chip {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 10px 13px; cursor: pointer; text-align: left; font: inherit;
+  color: var(--text-dim);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.set-provider-chip:hover { transform: translateY(-1px); border-color: var(--border-bright); color: var(--text); }
+.set-provider-chip:active { transform: scale(0.99); }
+.set-provider-chip.active {
+  color: var(--text); border-color: var(--brass);
+  background: linear-gradient(180deg, rgba(230, 177, 94, 0.1), var(--panel));
+  box-shadow: 0 0 0 1px var(--brass), 0 0 14px rgba(230, 177, 94, 0.28);
+}
+.set-provider-name { font-family: var(--font-display); font-weight: 600; font-size: 0.98rem; line-height: 1.15; }
+.set-provider-tag {
+  font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-mute);
+}
+.set-provider-chip.active .set-provider-tag { color: var(--brass); }
+.set-provider-desc {
+  margin: 10px 0 0; font-size: 0.82rem; line-height: 1.45;
+  color: var(--text-mute); max-width: 75ch;
+}
+
+/* Real dropdown for picking among loaded models — sits under the free-text input
+   (the native <datalist> is unreliable: clicking often shows nothing). */
+.set-model-picker { margin-top: 6px; width: 100%; }
+
+/* Advanced sampling knobs: a compact two-up grid of labelled number inputs. */
+.set-sampling-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px;
+}
+.set-sampling-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.set-sampling-cell > span {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--moon);
+}
+.set-sampling-cell > input { width: 100%; }
+@media (max-width: 520px) {
+  .set-sampling-grid { grid-template-columns: 1fr; }
+}
+
 /* The console's action footer + health readout. */
 .set-console-foot {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
@@ -108,26 +218,28 @@
   padding: 13px; box-shadow: var(--shadow-sm), var(--rim);
 }
 
-/* Accent swatches — little gem chips you tap to re-tint your romance accent. */
-.pset-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 140px)); justify-content: start; gap: 9px; }
-.pset-swatch {
+/* Accent swatches — little gem chips you tap to re-tint your romance accent.
+   Shared by the phone Settings app (.pset-) and the main page Appearance group
+   (.set-) so both render identical gem chips from one source of truth. */
+.pset-swatches, .set-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 140px)); justify-content: start; gap: 9px; }
+.pset-swatch, .set-swatch {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   background: none; border: none; cursor: pointer; padding: 4px 2px;
   color: var(--text-dim); font: inherit;
 }
-.pset-gem {
+.pset-gem, .set-gem {
   width: 38px; height: 38px; border-radius: 12px;
   border: 1px solid var(--border-bright);
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   transition: transform 0.12s ease, box-shadow 0.2s ease;
 }
-.pset-swatch:hover .pset-gem { transform: translateY(-2px); }
-.pset-swatch:active { transform: scale(0.96); }
-.pset-swatch.active .pset-gem {
+.pset-swatch:hover .pset-gem, .set-swatch:hover .set-gem { transform: translateY(-2px); }
+.pset-swatch:active, .set-swatch:active { transform: scale(0.96); }
+.pset-swatch.active .pset-gem, .set-swatch.active .set-gem {
   box-shadow: 0 0 0 2px var(--brass), 0 0 14px rgba(230, 177, 94, 0.5);
 }
-.pset-swatch-name { font-size: 0.68rem; text-align: center; line-height: 1.2; }
-.pset-swatch.active .pset-swatch-name { color: var(--text); font-weight: 700; }
+.pset-swatch-name, .set-swatch-name { font-size: 0.68rem; text-align: center; line-height: 1.2; }
+.pset-swatch.active .pset-swatch-name, .set-swatch.active .set-swatch-name { color: var(--text); font-weight: 700; }
 
 .pset-custom {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -162,4 +274,55 @@
 .pset-danger .pset-group-head { color: var(--ember); }
 .pset-danger .pset-group-head::after {
   background: linear-gradient(90deg, rgba(224, 122, 130, 0.5), transparent);
+}
+
+/* Heartmorrow Bench entry card — a lamplit invitation to the proving bench. */
+.set-bench-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.15s ease;
+}
+.set-bench-card:hover {
+  transform: translateY(-2px);
+}
+.set-bench-mark {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brass);
+  background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--brass) 24%, transparent), transparent 70%);
+  border: 1px solid color-mix(in srgb, var(--brass) 40%, var(--border));
+}
+.set-bench-body {
+  flex: 1;
+  min-width: 0;
+}
+.set-bench-body h2 {
+  margin: 2px 0 6px;
+}
+.set-bench-body p {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.set-bench-go {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--brass);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+}
+@media (max-width: 560px) {
+  .set-bench-card { flex-wrap: wrap; }
+  .set-bench-go { width: 100%; justify-content: flex-end; }
 }

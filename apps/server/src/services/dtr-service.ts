@@ -5,6 +5,7 @@ import {
   DTR_COOLDOWN_DAYS,
   RELATIONSHIP_STATUS_LABELS,
   currentStatus,
+  isBrokenUp,
   nextDtrRung,
   type DtrResponse,
   type RelationshipStatus,
@@ -34,14 +35,33 @@ const ACCEPT_MEMORY: Record<RelationshipStatus, string> = {
   cohabiting: 'We decided to move in together.',
 };
 
+/** DTR attempts in flight, keyed by sessionId (= the POST /conversations/:id/dtr
+ *  path id). A second concurrent attempt on the same date — a double-click, or a
+ *  retry across the LLM await — is rejected so the accept branch can't double-apply
+ *  the commitment deltas, milestone memory, and social vouch. */
+const dtrInFlight = new Set<string>();
+
 /**
  * Attempt to advance the relationship status (the DTR ladder). Mirrors the
  * walkout/jealousy pattern: gate (rung unlocked + cooldown) → structured judge →
  * SERVER applies all deltas/flags. Accept advances `status`; deflect just sets a
  * cooldown; backfire stings (tension) and ends a date. Fails safe (no mutation)
- * if the structured call fails.
+ * if the structured call fails. Serialized per session (in-flight lock) so a
+ * double-fire across the LLM await can't double-commit.
  */
 export async function attemptDtr(sessionId: string, signal?: AbortSignal): Promise<DtrResponse> {
+  if (dtrInFlight.has(sessionId)) {
+    throw badRequest('Hang on — that question is still landing.');
+  }
+  dtrInFlight.add(sessionId);
+  try {
+    return await attemptDtrInner(sessionId, signal);
+  } finally {
+    dtrInFlight.delete(sessionId);
+  }
+}
+
+async function attemptDtrInner(sessionId: string, signal?: AbortSignal): Promise<DtrResponse> {
   const session = sessionsRepo.get(sessionId);
   if (!session) throw notFound(`Session ${sessionId} not found.`);
   if (session.ended) throw badRequest('This date has already ended.');
@@ -53,6 +73,21 @@ export async function attemptDtr(sessionId: string, signal?: AbortSignal): Promi
 
   const character = getCharacter(session.characterId);
   const relationship = getRelationship(character.id);
+
+  // A broken-up relationship can ONLY come back through reconciliation (which
+  // requires warmth >= RECONCILE_WARMTH and clears state:brokenUp). Re-running the
+  // DTR ladder here would set status:'dating' while leaving state:brokenUp=true — an
+  // impossible combined state that also skips the warmth floor and can permanently
+  // block the happy ending. Guard it like createSession / sendChatMessage do.
+  if (isBrokenUp(relationship)) {
+    throw badRequest("You've broken up — you'll have to win them back before you can define things again.");
+  }
+
+  // They've started seeing someone else (an NPC poached a neglected interest) — the
+  // romance route is closed; you can't define a relationship with someone who's taken.
+  if (relationship.flags['state:seeingOther']) {
+    throw badRequest("They've started seeing someone else — that window has closed.");
+  }
 
   const next = nextDtrRung(relationship);
   if (!next) throw badRequest("You're already as committed as it gets.");
@@ -78,7 +113,7 @@ export async function attemptDtr(sessionId: string, signal?: AbortSignal): Promi
       recentMessages: recent,
       playerName: getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name,
     }),
-    { settings, task: 'Decide how the character responds to defining the relationship.', schemaName: 'DtrReaction', signal },
+    { settings, role: 'evaluator', task: 'Decide how the character responds to defining the relationship.', schemaName: 'DtrReaction', signal },
   );
   if (!result.ok) {
     // FAIL SAFE: do not mutate state (no status change, no cooldown).

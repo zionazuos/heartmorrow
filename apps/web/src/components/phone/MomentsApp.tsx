@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Character, Moment } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { useAppData } from '../../state/app-context';
-import { useT, type TFunc } from '../../i18n';
+import { relativeTime } from '../../i18n/labels';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { PortraitPicker } from '../PortraitPicker';
@@ -34,19 +35,9 @@ const KIND_EXPRESSION: Record<Moment['kind'], string> = {
   memory: 'thoughtful',
 };
 
-function ago(ts: number, t: TFunc): string {
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60) return t('profile.ago.justNow');
-  const m = Math.floor(s / 60);
-  if (m < 60) return t('profile.ago.minutes', { m });
-  const h = Math.floor(m / 60);
-  if (h < 24) return t('profile.ago.hours', { h });
-  return t('profile.ago.days', { d: Math.floor(h / 24) });
-}
-
 /** A scrapbook of your story with one character — milestones, dates, and keepsakes. */
 export function MomentsApp() {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const { activeWorldId, dayTick } = useAppData();
   const [characters, setCharacters] = useState<Character[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -87,10 +78,10 @@ export function MomentsApp() {
   if (characters.length === 0) {
     return (
       <div className="phone-app">
-        <PhoneAppBar title={t('phone.app.moments')} kicker={t('moments.kicker')} icon="moments" />
+        <PhoneAppBar title={t('moments.title')} kicker={t('moments.kicker')} icon="moments" />
         <div className="mom-shell">
-          <Empty icon={<Icon name="moments" size={36} />} title={t('moments.emptyPeopleTitle')}>
-            <p className="muted">{t('moments.emptyPeopleBody')}</p>
+          <Empty icon={<Icon name="moments" size={36} />} title={t('moments.noOneTitle')}>
+            <p className="muted">{t('moments.noOneBody')}</p>
           </Empty>
         </div>
       </div>
@@ -101,10 +92,10 @@ export function MomentsApp() {
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title={t('phone.app.moments')} kicker={t('moments.kicker')} icon="moments" />
+      <PhoneAppBar title={t('moments.title')} kicker={t('moments.kicker')} icon="moments" />
       <div className="mom-shell">
         <div className="mom-pick">
-          <div className="kicker">{t('moments.choose')}</div>
+          <div className="kicker">{t('moments.chooseSomeone')}</div>
           <PortraitPicker
             options={pickerOptions}
             value={selected}
@@ -123,7 +114,7 @@ export function MomentsApp() {
               <span className="mom-since">{t('moments.storyTogether')}</span>
               {moments.length > 0 && (
                 <span className="mom-count">
-                  {t(moments.length === 1 ? 'moments.countOne' : 'moments.countMany', { count: moments.length })}
+                  {t('moments.memoryCount', { count: moments.length })}
                 </span>
               )}
             </div>
@@ -147,7 +138,7 @@ export function MomentsApp() {
                 <div className="flex-fill">
                   <div className="mom-title">{m.title}</div>
                   {m.body && <div className="mom-body">{m.body}</div>}
-                  <div className="mom-when">{m.day != null ? t('dash.hud.day', { day: m.day }) : ago(m.createdAt, t)}</div>
+                  <div className="mom-when">{m.day != null ? t('moments.day', { day: m.day }) : relativeTime(m.createdAt)}</div>
                 </div>
               </div>
             ))}

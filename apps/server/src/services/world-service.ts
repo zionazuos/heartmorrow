@@ -28,8 +28,16 @@ export function getWorld(id: string): World {
 
 export function createWorld(input: WorldCreate): World {
   const now = Date.now();
-  const world = WorldSchema.parse({ ...input, id: newId('world'), createdAt: now, updatedAt: now });
-  return worldsRepo.insert(world);
+  // `notes` are persisted as separate world_notes rows, not columns on the world.
+  const { notes, ...worldInput } = input;
+  const world = WorldSchema.parse({ ...worldInput, id: newId('world'), createdAt: now, updatedAt: now });
+  if (!notes?.length) return worldsRepo.insert(world);
+  // Insert the world + its notes atomically (nested-transaction safe via savepoints).
+  return getDb().transaction(() => {
+    const created = worldsRepo.insert(world);
+    for (const n of notes) createWorldNote(created.id, n);
+    return created;
+  });
 }
 
 /**
@@ -82,15 +90,39 @@ export function updateWorld(id: string, patch: WorldUpdate): World {
  *    sessions+messages, threads+texts, chronicles, endings);
  *  - the no-FK / per-world-id tails (game_events, minigame_results, emails, and
  *    this world's player row + inventory).
- * So we delete those explicitly, in one transaction. Deleting each character row
- * fires its own ON DELETE CASCADE chain, cleaning up its progress.
+ * So we delete those explicitly, in one transaction.
+ *
+ * `deleteCharacters` controls what happens to this world's people:
+ *  - false (default): KEEP them as reusable definitions but unassign them
+ *    (world_id → NULL) and wipe the playthrough progress they accrued here, so
+ *    they resurface pristine under People → Unassigned. A character only ever
+ *    lives in one world, so all of its attached progress belongs to this world
+ *    and is safe to clear wholesale.
+ *  - true: delete each character row, firing its ON DELETE CASCADE chain to
+ *    clean up its progress.
  */
-export function deleteWorld(id: string): void {
+export function deleteWorld(id: string, deleteCharacters = false): void {
   getWorld(id);
   const db = getDb();
   const playerId = playerIdForWorld(id);
   db.transaction(() => {
-    for (const c of charactersRepo.listByWorld(id)) charactersRepo.delete(c.id);
+    const worldChars = charactersRepo.listByWorld(id);
+    if (deleteCharacters) {
+      for (const c of worldChars) charactersRepo.delete(c.id);
+    } else {
+      const now = Date.now();
+      for (const c of worldChars) {
+        // Wipe this world's playthrough progress off the character (the same set a
+        // character-delete cascade would reach), then detach it to unassigned.
+        db.run('DELETE FROM relationships WHERE character_id = ?', c.id);
+        db.run('DELETE FROM character_memories WHERE character_id = ?', c.id);
+        db.run('DELETE FROM conversation_sessions WHERE character_id = ?', c.id); // cascades messages + rapport
+        db.run('DELETE FROM message_threads WHERE character_id = ?', c.id); // cascades text_messages
+        db.run('DELETE FROM character_chronicles WHERE character_id = ?', c.id);
+        db.run('DELETE FROM character_endings WHERE character_id = ?', c.id);
+        db.run('UPDATE characters SET world_id = NULL, updated_at = ? WHERE id = ?', now, c.id);
+      }
+    }
     db.run('DELETE FROM game_events WHERE world_id = ?', id);
     db.run('DELETE FROM minigame_results WHERE world_id = ?', id);
     db.run('DELETE FROM emails WHERE world_id = ?', id);

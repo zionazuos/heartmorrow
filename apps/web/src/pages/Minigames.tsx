@@ -1,47 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  LoreQuizConfigSchema,
-  MemoryMatchConfigSchema,
-  TimingMeterConfigSchema,
-  SweetAndSourConfigSchema,
-  TwoTruthsConfigSchema,
-  RhythmSerenadeConfigSchema,
   type Character,
-  type LoreQuizSubmission,
-  type MemoryMatchSubmission,
   type MinigameFinishResponse,
   type MinigameId,
   type MinigameInfo,
   type MinigameSubmission,
-  type RhythmSerenadeSubmission,
-  type SweetAndSourSubmission,
-  type TimingMeterSubmission,
-  type TwoTruthsSubmission,
 } from '@dsim/shared';
 import { api } from '../lib/api';
 import { errorMessage } from '../lib/hooks';
 import { useAppData } from '../state/app-context';
-import { useT, type TFunc } from '../i18n';
-import { datingStatLabel, relStatLabel } from '../i18n/sharedLabels';
+import { datingStatLabel, relationshipStatLabel } from '../i18n/labels';
 import { Banner, Empty, Modal, Spinner } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { PortraitPicker } from '../components/PortraitPicker';
-import { MemoryMatchGame } from '../components/minigames/MemoryMatchGame';
-import { TimingMeterGame } from '../components/minigames/TimingMeterGame';
-import { LoreQuizGame } from '../components/minigames/LoreQuizGame';
-import { SweetAndSourGame } from '../components/minigames/SweetAndSourGame';
-import { TwoTruthsGame } from '../components/minigames/TwoTruthsGame';
-import { RhythmSerenade } from '../components/minigames/RhythmSerenade';
+import { GameView, type ActiveGame } from '../components/minigames/GameView';
 import './minigames.page.css';
 
-interface ActiveGame {
-  minigameId: MinigameId;
-  runId: string;
-  config: unknown;
-}
-
 export function Minigames() {
-  const t = useT();
+  const { t } = useTranslation(['pages', 'common']);
   const { reloadPlayer, refreshWorldState, activeWorldId, worldState, dayTick, activeDate } = useAppData();
   const [games, setGames] = useState<MinigameInfo[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -59,7 +36,8 @@ export function Minigames() {
     void (async () => {
       try {
         const [g, c] = await Promise.all([api.listMinigames(), api.listCharacters(activeWorldId ?? undefined)]);
-        setGames(g);
+        // Job games (paid skill work) live in the Work app, not the dating arcade.
+        setGames(g.filter((x) => x.mode !== 'job'));
         setCharacters(c);
         // Keep a still-valid partner across a day change; re-pick when the
         // current one isn't in the (possibly switched) world's roster.
@@ -87,14 +65,18 @@ export function Minigames() {
 
   const start = async (minigameId: MinigameId) => {
     if (activeDate) {
-      setError(t('mga.errOnDate', { name: activeDate.characterName }));
+      setError(t('minigames.errOnDate', { name: activeDate.characterName }));
       return;
     }
     setBusy(true);
     setError(undefined);
     setResult(null);
     try {
-      const res = await api.startMinigame({ minigameId, characterId: characterId || null, worldId: activeWorldId ?? null });
+      // A money-only job (no bond reward) is impersonal — never tie it to the
+      // selected partner, even though the picker stays on screen for the bonding games.
+      const info = games.find((g) => g.id === minigameId);
+      const cid = info && !info.rewardsCharacter ? null : characterId || null;
+      const res = await api.startMinigame({ minigameId, characterId: cid, worldId: activeWorldId ?? null });
       setActive({ minigameId, runId: res.runId, config: res.config });
     } catch (e) {
       setError(errorMessage(e));
@@ -135,32 +117,34 @@ export function Minigames() {
   return (
     <div className="stack">
       <div className="page-head">
-        <span className="kicker">{t('mga.kicker')}</span>
-        <h1>{t('mga.title')}</h1>
-        <p>{t('mga.lede')}</p>
+        <span className="kicker">{t('minigames.kicker')}</span>
+        <h1>{t('minigames.title')}</h1>
+        <p>{t('minigames.blurb')}</p>
       </div>
       {error && <Banner kind="error">{error}</Banner>}
       {outOfEnergy && !active && (
-        <Banner kind="info">{t('mga.outOfEnergy')}</Banner>
+        <Banner kind="info">{t('minigames.outOfEnergy')}</Banner>
       )}
       {onDate && !active && (
-        <Banner kind="info">{t('mga.onDateBanner', { name: activeDate!.characterName })}</Banner>
+        <Banner kind="info">
+          {t('minigames.onDateBanner', { name: activeDate!.characterName })}
+        </Banner>
       )}
 
       {result && (
         <Modal onClose={() => setResult(null)}>
-          <ResultCard result={result} onClose={() => setResult(null)} t={t} />
+          <ResultCard result={result} onClose={() => setResult(null)} />
         </Modal>
       )}
 
       {characters.length > 0 && !active && (
         <div className="card mga-console">
-          <span className="kicker">{t('mga.playingWith')}</span>
+          <span className="kicker">{t('minigames.playingWith')}</span>
           <PortraitPicker
             options={visibleChars.map((c) => ({ id: c.id, character: c }))}
             value={characterId}
             onChange={(id) => setCharacterId(id)}
-            none={{ label: t('mga.noOne'), sub: t('mga.moneyOnly') }}
+            none={{ label: t('minigames.noOne'), sub: t('minigames.moneyOnly') }}
             compact
           />
         </div>
@@ -176,17 +160,17 @@ export function Minigames() {
         <div className="framed mga-active">
           <div className="mga-stage-head">
             <div className="mga-stage-title">
-              <span className="kicker">{t('mga.nowPlaying')}</span>
+              <span className="kicker">{t('minigames.nowPlaying')}</span>
               <h2>{games.find((g) => g.id === active.minigameId)?.title}</h2>
             </div>
             <button className="btn sm ghost danger" onClick={() => setActive(null)} disabled={busy}>
-              {t('mga.quit')}
+              {t('minigames.quit')}
             </button>
           </div>
           <GameView active={active} partner={partner} onComplete={finish} />
         </div>
       ) : games.length === 0 ? (
-        <Empty icon={<Icon name="games" size={32} />} title={t('mga.noGames')} />
+        <Empty icon={<Icon name="games" size={32} />} title={t('minigames.noGames')} />
       ) : (
         <div className="mga-grid">
           {games.map((g, i) => (
@@ -195,7 +179,7 @@ export function Minigames() {
                 <span className="mga-no">{String(i + 1).padStart(2, '0')}</span>
                 <h3 className="mga-title">{g.title}</h3>
                 {g.rewardsCharacter && (
-                  <span className="mga-heart" title={t('mga.buildsBond')}>
+                  <span className="mga-heart" title={t('minigames.buildsBond')}>
                     <Icon name="date" size={13} />
                   </span>
                 )}
@@ -203,7 +187,7 @@ export function Minigames() {
               <p className="mga-desc">{g.description}</p>
               {g.targetStats.length > 0 && (
                 <div className="mga-stats">
-                  <span className="mga-stats-label">{t('mga.builds')}</span>
+                  <span className="mga-stats-label">{t('minigames.builds')}</span>
                   {g.targetStats.map((s) => (
                     <span className="mga-stat" key={s}>
                       {s}
@@ -217,13 +201,13 @@ export function Minigames() {
                 disabled={busy || outOfEnergy || onDate}
                 title={
                   onDate
-                    ? t('mga.finishFirst', { name: activeDate!.characterName })
+                    ? t('minigames.finishDateFirst', { name: activeDate!.characterName })
                     : outOfEnergy
-                      ? t('mga.outOfEnergyTitle')
+                      ? t('minigames.outOfEnergyTitle')
                       : undefined
                 }
               >
-                <Icon name="play" size={14} /> {t('mga.play')}
+                <Icon name="play" size={14} /> {t('minigames.play')}
               </button>
             </div>
           ))}
@@ -233,65 +217,8 @@ export function Minigames() {
   );
 }
 
-function GameView({
-  active,
-  partner,
-  onComplete,
-}: {
-  active: ActiveGame;
-  partner: Character | null;
-  onComplete: (s: MinigameSubmission) => void;
-}) {
-  switch (active.minigameId) {
-    case 'memory_match':
-      return (
-        <MemoryMatchGame
-          config={MemoryMatchConfigSchema.parse(active.config)}
-          onComplete={(submission: MemoryMatchSubmission) => onComplete({ minigameId: 'memory_match', submission })}
-        />
-      );
-    case 'timing_meter':
-      return (
-        <TimingMeterGame
-          config={TimingMeterConfigSchema.parse(active.config)}
-          onComplete={(submission: TimingMeterSubmission) => onComplete({ minigameId: 'timing_meter', submission })}
-        />
-      );
-    case 'lore_quiz':
-      return (
-        <LoreQuizGame
-          config={LoreQuizConfigSchema.parse(active.config)}
-          partner={partner ?? undefined}
-          onComplete={(submission: LoreQuizSubmission) => onComplete({ minigameId: 'lore_quiz', submission })}
-        />
-      );
-    case 'sweet_and_sour':
-      return (
-        <SweetAndSourGame
-          config={SweetAndSourConfigSchema.parse(active.config)}
-          onComplete={(submission: SweetAndSourSubmission) => onComplete({ minigameId: 'sweet_and_sour', submission })}
-        />
-      );
-    case 'two_truths_a_lie':
-      return (
-        <TwoTruthsGame
-          config={TwoTruthsConfigSchema.parse(active.config)}
-          onComplete={(submission: TwoTruthsSubmission) => onComplete({ minigameId: 'two_truths_a_lie', submission })}
-        />
-      );
-    case 'rhythm_serenade':
-      return (
-        <RhythmSerenade
-          config={RhythmSerenadeConfigSchema.parse(active.config)}
-          onComplete={(submission: RhythmSerenadeSubmission) => onComplete({ minigameId: 'rhythm_serenade', submission })}
-        />
-      );
-    default:
-      return null;
-  }
-}
-
-function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; onClose: () => void; t: TFunc }) {
+function ResultCard({ result, onClose }: { result: MinigameFinishResponse; onClose: () => void }) {
+  const { t } = useTranslation(['pages', 'common']);
   const { reward, score, grade } = result.result;
   const { reaction, milestone, isNewBest } = result;
   const datingEntries = Object.entries(reward.dating) as [string, number][];
@@ -299,7 +226,7 @@ function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; on
   const noRewards = datingEntries.length === 0 && relEntries.length === 0 && reward.money === 0;
 
   const statLabel = (key: string, kind: 'dating' | 'rel') =>
-    kind === 'rel' ? relStatLabel(t, key) : datingStatLabel(t, key);
+    kind === 'rel' ? relationshipStatLabel(key) : datingStatLabel(key);
 
   return (
     <div className="mga-result-modal">
@@ -307,9 +234,9 @@ function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; on
         <div className="mga-grade">
           <span className={`mga-grade-badge grade-${grade}`}>{grade}</span>
           <div className="mga-score">
-            <span className="kicker">{t('mga.finalScore')}</span>
+            <span className="kicker">{t('minigames.finalScore')}</span>
             <span className="num">{score}</span>
-            <span className="lbl">{t('mga.points')}</span>
+            <span className="lbl">{t('minigames.points')}</span>
           </div>
         </div>
         <button className="btn sm ghost" onClick={onClose}>
@@ -319,7 +246,7 @@ function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; on
 
       {isNewBest && (
         <div className="mga-best-ribbon">
-          <Icon name="trophy" size={14} /> {t('mga.newBest')}
+          <Icon name="trophy" size={14} /> {t('minigames.newBest')}
         </div>
       )}
 
@@ -329,12 +256,12 @@ function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; on
 
       {milestone && (
         <div className="mga-milestone">
-          <Icon name="date" size={15} /> <strong>{t('mga.milestone', { label: milestone.label })}</strong> {milestone.line}
+          <Icon name="date" size={15} /> <strong>{t('minigames.grewCloser', { label: milestone.label })}</strong> {milestone.line}
         </div>
       )}
 
       <p className="mga-reward-label">
-        {t('mga.rewards')} {result.playedFavorite && <span className="mga-fav-note">{t('mga.favNote')}</span>}
+        {t('minigames.rewards')} {result.playedFavorite && <span className="mga-fav-note">{t('minigames.favoriteNote')}</span>}
       </p>
       <div className="tags">
         {datingEntries.map(([k, v]) => (
@@ -355,7 +282,7 @@ function ResultCard({ result, onClose, t }: { result: MinigameFinishResponse; on
           </span>
         )}
         {noRewards && (
-          <span className="muted">{t('mga.noRewards')}</span>
+          <span className="muted">{t('minigames.noRewards')}</span>
         )}
       </div>
     </div>

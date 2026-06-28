@@ -23,6 +23,7 @@ import {
   buildWalkoutReactionMessages,
   buildDtrReactionMessages,
   buildPlayerBreakupMessages,
+  buildPlayerFarewellMessages,
   buildTextReplyMessages,
   buildTextJudgeMessages,
   buildDailyTextPlanMessages,
@@ -305,6 +306,7 @@ export async function estimatePrompts(req: PromptEstimateRequest): Promise<Promp
       description: 'Per-message rapport read during a date (structured).',
       messages: buildTurnReactionMessages({
         character,
+        relationship: dateCtx.relationship,
         needJudge: dateCtx.dateNeed ?? '',
         vibe: 'warming up nicely',
         recentMessages: dateCtx.recentMessages,
@@ -344,6 +346,19 @@ export async function estimatePrompts(req: PromptEstimateRequest): Promise<Promp
       messages: buildPlayerBreakupMessages({
         character,
         relationship: dateCtx.relationship,
+        recentMessages: dateCtx.recentMessages,
+        playerName,
+      }),
+      maxResponseTokens: reserve,
+    },
+    {
+      key: 'player_farewell',
+      label: 'Farewell reaction',
+      description: 'Whether your message ends the date, and the goodbye line (structured).',
+      messages: buildPlayerFarewellMessages({
+        character,
+        relationship: dateCtx.relationship,
+        vibe: 'warming up nicely',
         recentMessages: dateCtx.recentMessages,
         playerName,
       }),

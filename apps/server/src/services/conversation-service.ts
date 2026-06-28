@@ -7,7 +7,9 @@ import {
   WalkoutReactionSchema,
   TurnReactionSchema,
   PlayerBreakupReactionSchema,
+  PlayerFarewellReactionSchema,
   PROMPT_LIMITS,
+  GEN_TEXT,
   DEFAULT_PLAYER_ID,
   LAST_SEEN_FLAG,
   KNOWLEDGE_GOSSIP_MIN_FIDELITY,
@@ -32,6 +34,8 @@ import {
   linkTo,
   LINK_JEALOUSY_WEIGHT,
   CHARACTER_LINK_LABELS,
+  AFTERGLOW_MOOD_FLAG,
+  AFTERGLOW_DAY_FLAG,
   PHASE_LABELS,
   deriveCalendar,
   intimacyAllowed,
@@ -54,7 +58,7 @@ import {
 import { charactersRepo, chroniclesRepo, messagesRepo, npcKnowledgeRepo, relationshipsRepo, sessionsRepo, worldNotesRepo, worldStatesRepo } from '../db/repositories';
 import { newId, playerIdForWorld, playerIdForWorldOrDefault } from '../lib/ids';
 import { badRequest, notFound } from '../lib/errors';
-import { getCharacter, listAcquaintances } from './character-service';
+import { getCharacter, listAcquaintances, currentNpcPartners } from './character-service';
 import { getRelationship } from './relationship-service';
 import { getOrCreatePlayer, spendMoney } from './player-service';
 import { selectTopMemories } from './memory-service';
@@ -95,6 +99,7 @@ import {
   buildWalkoutReactionMessages,
   buildTurnReactionMessages,
   buildPlayerBreakupMessages,
+  buildPlayerFarewellMessages,
   estimatePromptChars,
   messageText,
   type PromptContext,
@@ -106,12 +111,37 @@ import { ThinkStripper, stripThink } from '../lib/think-filter';
 
 // --- session CRUD -----------------------------------------------------------
 
+/**
+ * Resolve the date-setup "Anywhere" choice to a concrete venue: the first FREE public
+ * location, or — when the world has none free — the cheapest one the player can
+ * currently afford. Throws if every venue costs more than the wallet holds (and none
+ * are free), so "Anywhere" can't silently start a date you can't pay for. Returns null
+ * only when the world has no venues at all (a locationless date is the fallback then).
+ */
+function pickAnywhereVenue(locations: readonly Location[], money: number): string | null {
+  if (locations.length === 0) return null;
+  const free = locations.find((l) => venueCost(l.priceTier) === 0);
+  if (free) return free.id;
+  // No free venue exists — fall back to the cheapest one you can afford.
+  const cheapestFirst = [...locations].sort((a, b) => venueCost(a.priceTier) - venueCost(b.priceTier));
+  const affordable = cheapestFirst.find((l) => venueCost(l.priceTier) <= money);
+  if (affordable) return affordable.id;
+  const cheapest = cheapestFirst[0]!;
+  throw badRequest(
+    `Everywhere in town costs more than you have right now (the cheapest, ${cheapest.name}, is ${venueCost(cheapest.priceTier)} and you have ${money}). Earn a little first, or date somewhere you own.`,
+  );
+}
+
 export function createSession(input: ConversationCreate): ConversationSession {
   const character = getCharacter(input.characterId); // validates existence
   // A memorialized character is gone — no further dates or chats (a kept record).
   if (isMemorialized(getRelationship(character.id))) {
     throw badRequest(`${character.name} is no longer with us.`);
   }
+  // The location the date actually happens at. "Anywhere" (a date-setup directive,
+  // not a real id) is resolved to a concrete venue inside the date block below; it
+  // never reaches a chat or worldless session as a literal location.
+  let resolvedLocationId: string | null = input.locationId ?? null;
   // Real meetings (anything but a free-form chat) cost a daily action and require
   // the character to be available today (world-bound only). 'chat' is exempt.
   if (input.mode !== 'chat' && character.worldId) {
@@ -137,11 +167,16 @@ export function createSession(input: ConversationCreate): ConversationSession {
     // A property venue is only valid if you own or currently lease it — reject a
     // `prop:` location you have no claim to rather than silently degrading to a
     // locationless date.
-    const loc = input.locationId ?? null;
-    if (loc?.startsWith('prop:') && !propertyVenueInfo(loc, character.worldId)) {
+    const world = worldsRepo.get(character.worldId) ?? null;
+    // "Anywhere": auto-pick the first free public venue, else the cheapest the player
+    // can currently afford — refusing the date outright when nothing is affordable.
+    if (resolvedLocationId === 'anywhere') {
+      resolvedLocationId = pickAnywhereVenue(world?.locations ?? [], getOrCreatePlayer(playerIdForWorld(character.worldId)).money);
+    }
+    if (resolvedLocationId?.startsWith('prop:') && !propertyVenueInfo(resolvedLocationId, character.worldId)) {
       throw badRequest('You can only date at a place you own or lease.');
     }
-    const venue = resolveSessionLocation(loc, character, worldsRepo.get(character.worldId) ?? null);
+    const venue = resolveSessionLocation(resolvedLocationId, character, world);
     const cost = venueCost(venue?.priceTier);
     if (cost > 0) {
       const money = getOrCreatePlayer(playerIdForWorld(character.worldId)).money;
@@ -151,12 +186,14 @@ export function createSession(input: ConversationCreate): ConversationSession {
         );
       }
     }
+  } else if (resolvedLocationId === 'anywhere') {
+    resolvedLocationId = null; // "Anywhere" is meaningless outside a world-bound date
   }
   const now = Date.now();
   const session = ConversationSessionSchema.parse({
     id: newId('sess'),
     characterId: input.characterId,
-    locationId: input.locationId,
+    locationId: resolvedLocationId,
     mode: input.mode,
     summary: '',
     ended: false,
@@ -235,6 +272,21 @@ function addCharacterMessage(sessionId: string, text: string, metadata: Record<s
     id: newId('msg'),
     sessionId,
     role: 'character',
+    text,
+    metadata,
+    createdAt: Date.now(),
+  });
+  return messagesRepo.insert(message);
+}
+
+/** Insert a third-person narration "beat" (scene-setting, gift lines, etc.) — not
+ *  dialogue. Rendered centered/quiet on the client and fed back to the model as
+ *  `Narration: …` so later turns stay aware of it. */
+function addNarratorMessage(sessionId: string, text: string, metadata: Record<string, unknown> = {}): Message {
+  const message = MessageSchema.parse({
+    id: newId('msg'),
+    sessionId,
+    role: 'narrator',
     text,
     metadata,
     createdAt: Date.now(),
@@ -411,6 +463,9 @@ export function buildPromptContextForSession(
     guardedness: character.guardedness,
     turnVerdict: opts?.turnVerdict ?? null,
     firstMeeting: isFirstMeeting(session, relationship),
+    // NPC(s) the world-sim has paired this character off with — so a coupled-off
+    // character is honest about being taken rather than denying it on a date.
+    npcPartners: currentNpcPartners(character).map((p) => p.name),
   };
 }
 
@@ -486,13 +541,20 @@ export function persistStreamedReply(sessionId: string, text: string): Message {
 }
 
 /**
- * On a FIRST date, let the character break the ice. Generates a single in-character
- * opening greeting and persists it as the date's first (character) message, so the
- * player isn't forced to open a date with a total stranger. Returns the message, or
- * null when it doesn't apply (plain chat, ended, already has turns, or not a first
- * meeting) or generation fails. Best-effort: never throws — on any failure the date
- * simply falls back to the player opening. The non-first-meeting cases short-circuit
- * BEFORE any LLM call, so a normal date pays no latency for this.
+ * Set the scene when a date opens, so the player has something to react to.
+ *
+ * - On a FIRST date the character breaks the ice: a single in-character opening
+ *   greeting, persisted as the date's first (character) message, so the player
+ *   isn't forced to open a date with a total stranger.
+ * - On a REPEAT date there's no introduction to make, so instead we lay down a
+ *   short third-person "venue flavor" beat — narration, not dialogue — describing
+ *   where the character is, what they're doing, and the weather/time of day.
+ *
+ * Returns the persisted message, or null when it doesn't apply (plain chat, ended,
+ * or the session already has turns) or generation fails. Best-effort: never throws —
+ * on any failure the date simply falls back to the player opening (and the client's
+ * static opening card). Plain chats and ended/active sessions short-circuit BEFORE
+ * any LLM call.
  */
 export async function openConversation(sessionId: string): Promise<Message | null> {
   let session: ConversationSession;
@@ -504,24 +566,40 @@ export async function openConversation(sessionId: string): Promise<Message | nul
   if (session.ended || session.mode === 'chat') return null;
   if (messagesRepo.countBySession(sessionId) > 0) return null; // someone already spoke
   const character = getCharacter(session.characterId);
-  if (!isFirstMeeting(session, getRelationship(character.id))) return null;
+  const firstMeeting = isFirstMeeting(session, getRelationship(character.id));
 
   const settings = getLlmSettings();
   try {
     const messages = buildDialogueRequest(sessionId);
-    messages.push({
-      role: 'system',
-      content:
-        `OOC stage direction: the date is just beginning and this is the first time the two of you are meeting. ` +
-        `You speak first — open the conversation yourself with a warm, natural greeting in your own voice: ` +
-        `say hello, introduce yourself, and break the ice however suits you. Stay true to how guarded or outgoing you are, ` +
-        `and keep it to just a line or two (an opening, not a monologue). Follow everything above about what you do and don't know about them.`,
-    });
+    if (firstMeeting) {
+      messages.push({
+        role: 'system',
+        content:
+          `OOC stage direction: the date is just beginning and this is the first time the two of you are meeting. ` +
+          `You speak first — open the conversation yourself with a warm, natural greeting in your own voice: ` +
+          `say hello, introduce yourself, and break the ice however suits you. Stay true to how guarded or outgoing you are, ` +
+          `and keep it to just a line or two (an opening, not a monologue). Follow everything above about what you do and don't know about them.`,
+      });
+    } else {
+      // Repeat date: no introduction needed — set the scene instead, in third person.
+      messages.push({
+        role: 'system',
+        content:
+          `OOC stage direction: set the scene for the moment the player arrives at the start of this date. ` +
+          `Write 2-3 sentences of vivid third-person narration: where ${character.name} is and what they're doing at the venue, ` +
+          `the atmosphere of the place, and the weather and time of day (use the scene and world details above). ` +
+          `Describe ${character.name} from the OUTSIDE, by name (e.g. "${character.name} is waiting at a corner table, ..."). ` +
+          `This is stage-setting prose for the player to read — NOT a spoken line: do not write any dialogue, do not speak in ` +
+          `${character.name}'s voice, no greeting, and no quotation marks. Just the scene.`,
+      });
+    }
     const adapter = getAdapter(settings);
     const res = await adapter.chat({ messages, temperature: settings.temperature, maxTokens: settings.maxTokens });
     const text = stripThink(res.content).trim();
     if (!text) return null;
-    const message = addCharacterMessage(sessionId, text, { opener: true });
+    const message = firstMeeting
+      ? addCharacterMessage(sessionId, text, { opener: true })
+      : addNarratorMessage(sessionId, text, { venueFlavor: true });
     touchSession(session);
     return message;
   } catch {
@@ -563,9 +641,13 @@ export interface WalkoutOutcome {
 }
 
 /**
- * If the player's latest message is egregious, ask the model (structured)
- * whether the character ends the date and walks out. Returns the farewell
- * message + ends the session, or null. Rare by design; fails safe (no walkout).
+ * If the player's latest message is egregious, ask the model (structured) whether
+ * the character ends the date and walks out. Applies the walkout's special penalty,
+ * grievance, and memory, then voices the farewell — but does NOT end the session
+ * itself: the CLIENT runs the normal end-and-evaluate flow next, so a blown-up date
+ * is scored in full (stamina, evaluator deltas/memories, milestones, strain), exactly
+ * like a date the player ended deliberately. Returns the farewell message + reason,
+ * or null. Rare by design; fails safe (no walkout).
  */
 export async function attemptWalkout(
   sessionId: string,
@@ -589,47 +671,39 @@ export async function attemptWalkout(
   const result = await callStructuredLlm(
     WalkoutReactionSchema,
     buildWalkoutReactionMessages({ character, relationship, recentMessages: recent, playerName: getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name }),
-    { settings, task: 'Decide whether the character ends the date now.', schemaName: 'WalkoutReaction', signal },
+    { settings, role: 'evaluator', task: 'Decide whether the character ends the date now.', schemaName: 'WalkoutReaction', signal },
   );
   if (!result.ok || !result.data.walkout) return null;
 
+  // Apply the walkout's SPECIAL consequences — the things the normal date evaluator
+  // can't infer: the penalty for egregious behavior, the carried-forward grievance
+  // (state:offended), the same-day cooldown, the despair hit, and a durable conflict
+  // memory. We deliberately DO NOT end the session here: like a date the player ends
+  // with a natural goodbye (see attemptPlayerFarewell), the CLIENT then runs the
+  // normal end-and-evaluate flow, so the blown-up date is still scored IN FULL —
+  // stamina spent, evaluator deltas/memories, milestones, strain. endSession is told
+  // (via the farewell's metadata) not to "air out" the offense it was the eval for.
   applyRelationshipChange(character.id, { ...WALKOUT_PENALTY }, { source: 'walkout', detail: { reason: result.data.reason } });
   setRelationshipFlag(character.id, 'state:offended', true, { source: 'walkout' });
+  const walkoutDay = character.worldId ? ensureWorldState(character.worldId).day : 0;
   if (character.worldId) {
-    const wday = ensureWorldState(character.worldId).day;
-    setRelationshipFlag(character.id, 'walkout:lastDay', wday, { source: 'walkout' });
+    setRelationshipFlag(character.id, 'walkout:lastDay', walkoutDay, { source: 'walkout' });
     // (Opt-in) cruelty severe enough to drive a deeply-attached partner out feeds
     // the despair spiral — no-op unless enabled AND they were close to you.
     try {
-      adjustDespair(character.id, DESPAIR.hostility, 'hostility', wday);
+      adjustDespair(character.id, DESPAIR.hostility, 'hostility', walkoutDay);
     } catch {
       /* best-effort */
     }
   }
-  // A real date occurred (the player earned a walkout over real turns): spend the
-  // daily action + stamp last-seen, exactly like a normally-ended date. Best-effort
-  // so it never blocks the farewell (e.g. if stamina is already 0).
-  if (character.worldId) {
-    try {
-      const wday2 = ensureWorldState(character.worldId).day;
-      stampLastDate(character.id, wday2);
-      if (session.mode === 'date' || session.mode === 'event') spendStamina(character.worldId);
-    } catch {
-      /* best-effort: a date that blew up still ends */
-    }
-  }
   const message = addCharacterMessage(sessionId, result.data.farewellLine.trim(), { walkout: true });
-  sessionsRepo.update(ConversationSessionSchema.parse({ ...session, ended: true, updatedAt: Date.now() }));
-  const walkoutDay = character.worldId ? ensureWorldState(character.worldId).day : 0;
   const walkoutEvent = recordEvent('walkout', {
     characterId: character.id,
     reason: result.data.reason,
     ...(character.worldId ? { day: walkoutDay } : {}),
   });
-  // The character now REMEMBERS the blow-up. A walkout used to leave ONLY the
-  // transient state:offended flag (cleared at the next date), so they'd act as if
-  // nothing happened. Write a durable memory of what the player did + a chronicle
-  // line, with safe fallbacks when the model omits the new fields.
+  // A durable, first-person grievance memory so they carry the blow-up forward (the
+  // full evaluator may write its own too; this guarantees a conflict-tagged record).
   const walkoutPlayerName = getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name;
   const walkoutMemory =
     result.data.memory.trim() ||
@@ -639,23 +713,11 @@ export async function attemptWalkout(
   try {
     addMemoriesFromEvaluation(
       character.id,
-      [{ text: walkoutMemory.slice(0, 400), importance: 5, tags: ['conflict'] }],
+      [{ text: walkoutMemory.slice(0, GEN_TEXT.line), importance: 5, tags: ['conflict'] }],
       walkoutEvent.id,
     );
-    const walkoutSummary =
-      result.data.summaryLine.trim() || `${walkoutPlayerName} crossed a line and ${character.name} walked out of the date.`;
-    appendSessionToChronicle(character.id, walkoutSummary, session.mode, walkoutDay);
   } catch {
     /* best-effort: remembering the blow-up must never block the farewell */
-  }
-  // Storming out of a date can strain a committed relationship onto the rocks
-  // (or break it) — the walkout spiked tension above.
-  if (character.worldId) {
-    try {
-      evaluateRelationshipStrain(character.id, { day: ensureWorldState(character.worldId).day, trigger: 'date', mode: session.mode });
-    } catch {
-      /* strain is best-effort */
-    }
   }
   return { message, reason: result.data.reason };
 }
@@ -726,12 +788,18 @@ export async function judgeTurn(sessionId: string, signal?: AbortSignal): Promis
     TurnReactionSchema,
     buildTurnReactionMessages({
       character,
+      relationship: getRelationship(character.id),
       needJudge: need?.judge ?? '',
       vibe: rapportLabel(getRapport(sessionId)),
       recentMessages: all.slice(-8),
+      // More memories than the text judge (5): the date judge sees only 8 lines of the
+      // live exchange, so it relies on shared history to recognize callbacks/inside jokes.
+      memories: selectTopMemories(character.id, 8),
       playerName: getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name,
     }),
-    { settings, task: 'Judge how the last message landed on this date.', schemaName: 'TurnReaction', signal },
+    // Floor the output budget so a chatty `note` can't truncate the JSON mid-string
+    // under the evaluator role's small maxTokens (truncation → parse fail → no rapport change).
+    { settings, role: 'evaluator', minMaxTokens: 512, task: 'Judge how the last message landed on this date.', schemaName: 'TurnReaction', signal },
   );
   if (!result.ok) return null; // fail-safe — no rapport change
 
@@ -753,10 +821,12 @@ export interface LeaveOutcome {
 
 /**
  * If this date's rapport has cratered (the character has quietly lost interest),
- * they end the date themselves — a soft, non-hostile early exit (distinct from a
- * walkout, which is for egregious behavior). Runs BEFORE the reply on the
- * player's next message, so a "losing interest" turn warns first, then they
- * leave. Applies a real cost. Returns the farewell + ends the session, or null.
+ * they call it a night themselves — a soft, non-hostile early exit (distinct from a
+ * walkout, which is for egregious behavior). Runs BEFORE the reply on the player's
+ * next message, so a "losing interest" turn warns first, then they leave. Applies the
+ * leave penalty + a memory, then (like a natural farewell) leaves the session OPEN so
+ * the CLIENT runs the normal end-and-evaluate flow — the flat date is scored in full
+ * (stamina, deltas, memories, milestones, strain). Returns the farewell, or null.
  * Fails safe (no early exit on error).
  */
 export async function maybeLeaveForLostInterest(sessionId: string, signal?: AbortSignal): Promise<LeaveOutcome | null> {
@@ -775,37 +845,27 @@ export async function maybeLeaveForLostInterest(sessionId: string, signal?: Abor
       role: 'system',
       content:
         `OOC stage direction: this date isn't working for you — you've quietly lost interest and want to wrap it up now. ` +
-        `Give ONE short, in-character line making a polite excuse to end the evening and leave (an early night, somewhere to be). ` +
+        `Give a brief, in-character send-off — a few sentences (roughly two or three), not a single clipped line — making a polite excuse to wrap things up and head out (somewhere else to be, an early start tomorrow). ` +
         `Not cruel, just done — no questions, and no plans to meet again.`,
     });
     const adapter = getAdapter(settings);
-    const res = await adapter.chat({ messages, temperature: settings.temperature, maxTokens: 200 }, signal);
+    const res = await adapter.chat({ messages, temperature: settings.temperature, maxTokens: 300 }, signal);
     line = stripThink(res.content).trim();
   } catch {
     line = '';
   }
-  if (!line) line = `Hey — it's been a long week and I'm pretty wiped. I think I'm gonna call it a night. Take care, okay?`;
+  if (!line) line = `Hey — it's been a long week and I'm pretty wiped. I think I'm gonna head out. Take care, okay?`;
 
+  // Apply the soft-leave's penalty + a memory of the fizzle, then voice the goodbye —
+  // but DON'T end the session: like a natural farewell, the CLIENT runs the normal
+  // end-and-evaluate flow next, so the flat date is scored in full (stamina, evaluator
+  // deltas/memories, the cratered-rapport consequence, milestones, strain). Rapport is
+  // left intact on purpose so endSession's low-rapport effect still lands.
   applyRelationshipChange(character.id, { ...RAPPORT_LEAVE_PENALTY }, { source: 'rapport', detail: { reason: 'lost_interest' } });
-  // A real date occurred (rapport cratered over real turns): spend the daily action
-  // + stamp last-seen like any ended date — this is the "real cost" the docstring
-  // promises. Best-effort so it never blocks the farewell.
-  if (character.worldId) {
-    try {
-      stampLastDate(character.id, ensureWorldState(character.worldId).day);
-      if (session.mode === 'date' || session.mode === 'event') spendStamina(character.worldId);
-    } catch {
-      /* best-effort: the date still ends */
-    }
-  }
   const message = addCharacterMessage(sessionId, line, { left: true });
-  sessionsRepo.update(ConversationSessionSchema.parse({ ...session, ended: true, updatedAt: Date.now() }));
-  clearRapport(sessionId);
   const leftEvent = recordEvent('date_left', { characterId: character.id, reason: 'lost_interest' });
-  // A soft early-exit used to leave no trace either — so remember the fizzled date,
-  // and fold it into the chronicle, so a run of flat dates actually registers.
+  // Remember the fizzle so a run of flat dates registers (the evaluator may add its own).
   const leftPlayerName = getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name;
-  const leftDay = character.worldId ? ensureWorldState(character.worldId).day : 0;
   try {
     addMemoriesFromEvaluation(
       character.id,
@@ -818,17 +878,8 @@ export async function maybeLeaveForLostInterest(sessionId: string, signal?: Abor
       ],
       leftEvent.id,
     );
-    appendSessionToChronicle(character.id, `The date with ${leftPlayerName} fizzled and ${character.name} left early.`, session.mode, leftDay);
   } catch {
     /* best-effort */
-  }
-  // Losing interest and ending the date early can strain a committed relationship.
-  if (character.worldId) {
-    try {
-      evaluateRelationshipStrain(character.id, { day: ensureWorldState(character.worldId).day, trigger: 'date', mode: session.mode });
-    } catch {
-      /* strain is best-effort */
-    }
   }
   return { message, reason: 'lost_interest' };
 }
@@ -878,13 +929,69 @@ export async function attemptPlayerBreakupIntent(
   const result = await callStructuredLlm(
     PlayerBreakupReactionSchema,
     buildPlayerBreakupMessages({ character, relationship, recentMessages: recent, playerName: getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name }),
-    { settings, task: 'Decide whether the player is genuinely breaking up, and react in character.', schemaName: 'PlayerBreakupReaction', signal },
+    { settings, role: 'evaluator', task: 'Decide whether the player is genuinely breaking up, and react in character.', schemaName: 'PlayerBreakupReaction', signal },
   );
   // Not genuine (joking/hypothetical/opposite) or a failed call → normal reply.
   if (!result.ok || !result.data.genuine) return null;
 
   const message = addCharacterMessage(sessionId, result.data.line.trim(), { breakupIntent: true });
   return { message, reaction: result.data.reaction };
+}
+
+// --- Player-initiated farewell (natural end of date) ------------------------
+
+/** Cheap no-LLM screen for a player message that reads like winding the date down. */
+const FAREWELL_INTENT_RE =
+  /\b(i\s*(?:should|gotta|have\s*to|need\s*to|better|ought\s*to|'?ll)\s+(?:get\s*going|get\s*home|head(?:ing)?\s*(?:out|home|off|back)|take\s*off|leave|go|run|call\s*it)|i'?m\s+(?:gonna|going\s*to)\s+(?:get\s*going|head(?:ing)?\s*(?:out|home)|take\s*off|call\s*it|go|leave)|head(?:ing)?\s+(?:out|home|off)\s*(?:now)?|get\s*going|call\s*it\s+(?:a\s+night|a\s+day|here|quits)|wrap(?:ping)?\s+(?:this|it)\s+up|let'?s\s+call\s+it|that'?s\s+my\s+cue|time\s+(?:for\s+me\s+)?to\s+(?:go|head\s*out|leave)|see\s+you\s+(?:around|later|next\s+time|soon)|good\s*night|i'?d\s+better\s+(?:go|get\s*going|head|run)|gotta\s+(?:run|go|head\s*out)|getting\s+late)\b/i;
+
+export interface FarewellOutcome {
+  /** The character's send-off, persisted as a character message. */
+  message: Message;
+  /** Expression for the live portrait as they say goodbye. */
+  expression: string;
+}
+
+/**
+ * If the player's latest message reads like an AMICABLE end to the date ("I
+ * should get going") — not a breakup, not hostility — ask the model (structured)
+ * whether they genuinely mean to leave now and, if so, voice the character's
+ * goodbye. Unlike a walkout or a lost-interest exit, this does NOT end the
+ * session itself: it persists the send-off and lets the CLIENT run the normal
+ * end-and-evaluate flow, so a date the player chose to end naturally is scored in
+ * full (deltas, memories, milestones). Returns the farewell + portrait
+ * expression, or null (→ fall through to a normal reply) when there's no farewell
+ * intent, the model judges it non-genuine (a bathroom break, proposing the next
+ * thing, just musing about the time), or the structured call fails.
+ */
+export async function attemptPlayerFarewell(
+  sessionId: string,
+  playerText: string,
+  signal?: AbortSignal,
+): Promise<FarewellOutcome | null> {
+  const session = getSession(sessionId);
+  if (session.ended || session.mode === 'chat') return null;
+  if (!FAREWELL_INTENT_RE.test(playerText)) return null;
+
+  const character = getCharacter(session.characterId);
+  const relationship = getRelationship(character.id);
+  const settings = getLlmSettings();
+  const recent = messagesRepo.listBySession(sessionId).slice(-12);
+  const result = await callStructuredLlm(
+    PlayerFarewellReactionSchema,
+    buildPlayerFarewellMessages({
+      character,
+      relationship,
+      vibe: rapportLabel(getRapport(sessionId)),
+      recentMessages: recent,
+      playerName: getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId)).name,
+    }),
+    { settings, role: 'evaluator', task: 'Decide whether the player is ending the date, and voice the goodbye.', schemaName: 'PlayerFarewellReaction', signal },
+  );
+  // Not genuine (stepping away / proposing more / musing) or a failed call → normal reply.
+  if (!result.ok || !result.data.ending) return null;
+
+  const message = addCharacterMessage(sessionId, result.data.farewellLine.trim(), { farewell: true });
+  return { message, expression: result.data.expression.trim() };
 }
 
 /**
@@ -1122,29 +1229,59 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
 
   // A real date occurred: stamp "last seen" and spend a daily action (once,
   // before the session is marked ended). World-bound dates/events only.
-  if (!session.ended) {
-    const actor = getCharacter(session.characterId);
-    if (actor.worldId) {
-      stampLastDate(session.characterId, ensureWorldState(actor.worldId).day);
-      if (session.mode === 'date' || session.mode === 'event') {
-        // Funds were checked at createSession; re-check here in case the wallet was
-        // drained mid-date. A property you own or lease is FREE (the lease rent /
-        // purchase covers it); any other venue charges its full tier price.
-        const venue = resolveSessionLocation(session.locationId, actor, worldsRepo.get(actor.worldId) ?? null);
-        const propVenue = propertyVenueInfo(session.locationId, actor.worldId);
-        const cost = propVenue ? 0 : venueCost(venue?.priceTier);
-        const pid = playerIdForWorld(actor.worldId);
-        // Refuse to end the date if it can no longer be paid (mirrors the createSession
-        // gate), BEFORE spending stamina — rather than silently discounting the venue to
-        // whatever's left. The session stays open, so it's re-endable once funds return.
-        if (cost > 0 && getOrCreatePlayer(pid).money < cost) {
-          throw badRequest(
-            `You can no longer afford ${venue?.name ?? 'this venue'} (it costs ${cost}, you have ${getOrCreatePlayer(pid).money}). Settle up before ending the date.`,
-          );
-        }
-        spendStamina(actor.worldId);
-        if (cost > 0) spendMoney(cost, pid);
-      }
+  const endActor = getCharacter(session.characterId);
+
+  // Read-only affordability gate FIRST (no mutation, no claim): funds were checked
+  // at createSession; re-check here in case the wallet was drained mid-date. A
+  // property you own or lease is FREE (the lease rent / purchase covers it); any
+  // other venue charges its full tier price. Refusing here — BEFORE we claim/end
+  // the session — keeps it OPEN and re-endable once funds return, rather than
+  // ending it then bouncing the charge.
+  let pendingCharge: { worldId: string; cost: number; pid: string } | null = null;
+  if (endActor.worldId && (session.mode === 'date' || session.mode === 'event')) {
+    const venue = resolveSessionLocation(session.locationId, endActor, worldsRepo.get(endActor.worldId) ?? null);
+    const propVenue = propertyVenueInfo(session.locationId, endActor.worldId);
+    const cost = propVenue ? 0 : venueCost(venue?.priceTier);
+    const pid = playerIdForWorld(endActor.worldId);
+    if (cost > 0 && getOrCreatePlayer(pid).money < cost) {
+      throw badRequest(
+        `You can no longer afford ${venue?.name ?? 'this venue'} (it costs ${cost}, you have ${getOrCreatePlayer(pid).money}). Settle up before ending the date.`,
+      );
+    }
+    pendingCharge = { worldId: endActor.worldId, cost, pid };
+  }
+
+  // Atomically claim the session BEFORE the (multi-second) evaluator await below.
+  // Without this, two concurrent end requests (double-click, retry on a slow eval,
+  // or an auto-end racing a manual end) would BOTH pass the `session.ended` guard
+  // above, BOTH spend money/stamina, and BOTH apply the evaluation. claimEnd flips
+  // ended 0->1 in one statement; a request that loses the claim bails here.
+  if (!sessionsRepo.claimEnd(session.id)) {
+    clearRapport(sessionId);
+    return {
+      session: { ...session, ended: true },
+      evaluated: false,
+      relationship: null,
+      mood: null,
+      expression: null,
+      summaryLine: null,
+      memoriesWritten: 0,
+      evalError: 'This date has already ended.',
+      jealousy: null,
+      milestone: null,
+      breakup: null,
+      onTheRocks: false,
+      reconciled: false,
+      ending: null,
+    };
+  }
+
+  // Claimed: commit the one-time end costs (runs exactly once per session).
+  if (endActor.worldId) {
+    stampLastDate(session.characterId, ensureWorldState(endActor.worldId).day);
+    if (pendingCharge) {
+      spendStamina(pendingCharge.worldId);
+      if (pendingCharge.cost > 0) spendMoney(pendingCharge.cost, pendingCharge.pid);
     }
   }
 
@@ -1154,6 +1291,12 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
   const incomingFlags = getRelationship(session.characterId).flags;
   const incomingJealous = incomingFlags['state:jealous'] === true;
   const incomingOffended = incomingFlags['state:offended'] === true;
+  // A date that ENDED in a walkout (the character stormed out this very session)
+  // shouldn't have that fresh offense "aired out" by the same eval — they carry it
+  // INTO the next date. Detect it from the walkout farewell's metadata so the
+  // grievance attemptWalkout just set survives, and so a cruel night doesn't also
+  // heal the despair spiral like a normal evening together would.
+  const endedInWalkout = messages.some((m) => m.role === 'character' && m.metadata?.['walkout'] === true);
 
   // A monogamous character may "find out" about other people you've seen lately.
   const jealousy = maybeRollJealousy(getCharacter(session.characterId));
@@ -1163,13 +1306,14 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
   const ctx = buildPromptContextForSession(session, evalMessages);
   const result = await callStructuredLlm(SessionEvaluationSchema, buildEvaluatorMessages(ctx), {
     settings,
+    role: 'evaluator',
     task: 'Evaluate how this dating-sim conversation affected the relationship and record memories.',
     schemaName: 'SessionEvaluation',
     // A maximal eval (summaryLine + up to 8 memories) plus a reasoning model's
     // think tokens can outgrow a user-lowered budget; the whole eval is fail-safe
     // DISCARDED on a truncated/invalid response (recap, memories, and deltas all
-    // lost), so floor the headroom.
-    maxTokens: Math.max(settings.maxTokens, 3000),
+    // lost), so floor the headroom (against the evaluator's own budget).
+    minMaxTokens: 3000,
   });
 
   // This real session is ending → decay temporary buffs by one session NOW that the
@@ -1208,11 +1352,11 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
   // Resolve the emotional state carried INTO this date — they've now had the
   // chance to air it. Keep jealousy that was freshly discovered this turn so it
   // colors the NEXT date instead.
-  if (incomingOffended) setRelationshipFlag(session.characterId, 'state:offended', false, { source: 'state_resolved' });
+  if (incomingOffended && !endedInWalkout) setRelationshipFlag(session.characterId, 'state:offended', false, { source: 'state_resolved' });
   if (incomingJealous && !jealousy?.triggered) {
     setRelationshipFlag(session.characterId, 'state:jealous', false, { source: 'state_resolved' });
   }
-  const stateResolved = incomingOffended || (incomingJealous && !jealousy?.triggered);
+  const stateResolved = (incomingOffended && !endedInWalkout) || (incomingJealous && !jealousy?.triggered);
 
   // The day's weather + the venue (indoor/outdoor) nudge the date. Server-owned,
   // clamped — and applied BEFORE milestone detection so it can tip a crossing.
@@ -1277,8 +1421,10 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
   clearRapport(session.id);
 
   // (Opt-in) showing up for a real, non-cruel evening helps pull a struggling
-  // partner back from the despair spiral — the off-ramp. (No-op unless enabled.)
-  if (actor.worldId && (session.mode === 'date' || session.mode === 'event')) {
+  // partner back from the despair spiral — the off-ramp. A date that ended in a
+  // walkout is the opposite of that, so it never heals (the walkout already applied
+  // its own hostility hit). (No-op unless enabled.)
+  if (actor.worldId && (session.mode === 'date' || session.mode === 'event') && !endedInWalkout) {
     try {
       adjustDespair(session.characterId, -DESPAIR.dateHeal, 'time_together', chronDay);
     } catch {
@@ -1322,6 +1468,15 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
     appendSessionToChronicle(session.characterId, evaluation.summaryLine, session.mode, chronDay);
   } catch {
     /* chronicle is best-effort; never block ending a date */
+  }
+
+  // Carry the date's emotional register forward briefly: stamp the evaluator's mood
+  // (plus the day) so the next day-or-so of texts honor how the night left them
+  // feeling instead of snapping straight back to breezy texting. A fresh date
+  // overwrites it; the read side (text prompts) lets it fade after DATE_AFTERGLOW_DAYS.
+  if (session.mode === 'date' || session.mode === 'event') {
+    setRelationshipFlag(session.characterId, AFTERGLOW_MOOD_FLAG, evaluation.mood, { source: 'date' });
+    setRelationshipFlag(session.characterId, AFTERGLOW_DAY_FLAG, chronDay, { source: 'date' });
   }
 
   // Endgame: a committed relationship may go on the rocks / break up after a bad

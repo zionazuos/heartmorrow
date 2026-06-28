@@ -378,6 +378,7 @@ function rowToPlayer(r: Row): PlayerProfile {
     sexuality: r.sexuality ?? 'unspecified',
     personaNotes: r.persona_notes,
     money: Number(r.money),
+    career: fromJson(r.career, {}),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   });
@@ -388,17 +389,23 @@ export const playersRepo = {
     const r = getDb().get<Row>('SELECT * FROM players WHERE id = ?', id);
     return r ? rowToPlayer(r) : undefined;
   },
+  /** Every player row. Money/persona live under PER-WORLD ids (player:<worldId>),
+   *  so a faithful savegame export MUST enumerate all of them, not just the legacy
+   *  default. */
+  list(): PlayerProfile[] {
+    return getDb().all<Row>('SELECT * FROM players ORDER BY created_at').map(rowToPlayer);
+  },
   insert(p: PlayerProfile): PlayerProfile {
     getDb().run(
-      `INSERT INTO players (id,name,pronouns,gender,sexuality,persona_notes,money,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-      p.id, p.name, p.pronouns, p.gender, p.sexuality, p.personaNotes, p.money, p.createdAt, p.updatedAt,
+      `INSERT INTO players (id,name,pronouns,gender,sexuality,persona_notes,money,career,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      p.id, p.name, p.pronouns, p.gender, p.sexuality, p.personaNotes, p.money, j(p.career), p.createdAt, p.updatedAt,
     );
     return p;
   },
   update(p: PlayerProfile): PlayerProfile {
     getDb().run(
-      `UPDATE players SET name=?,pronouns=?,gender=?,sexuality=?,persona_notes=?,money=?,updated_at=? WHERE id=?`,
-      p.name, p.pronouns, p.gender, p.sexuality, p.personaNotes, p.money, p.updatedAt, p.id,
+      `UPDATE players SET name=?,pronouns=?,gender=?,sexuality=?,persona_notes=?,money=?,career=?,updated_at=? WHERE id=?`,
+      p.name, p.pronouns, p.gender, p.sexuality, p.personaNotes, p.money, j(p.career), p.updatedAt, p.id,
     );
     return p;
   },
@@ -491,6 +498,23 @@ export const sessionsRepo = {
       s.locationId, s.mode, s.summary, boolToInt(s.ended), s.updatedAt, s.id,
     );
     return s;
+  },
+  /**
+   * Atomically mark a session ended, but ONLY if it wasn't already. Returns true
+   * iff THIS call flipped it (so the caller may apply its one-time end effects —
+   * stamina/money spend, evaluation deltas, walkout penalty), false if it was
+   * already ended/gone. The single conditional UPDATE is the concurrency guard for
+   * endSession / attemptWalkout / maybeLeaveForLostInterest racing across an LLM
+   * await (two end-requests, a walkout racing a manual end, etc.).
+   */
+  claimEnd(id: string): boolean {
+    return (
+      getDb().run(
+        'UPDATE conversation_sessions SET ended = 1, updated_at = ? WHERE id = ? AND ended = 0',
+        Date.now(),
+        id,
+      ).changes === 1
+    );
   },
   delete(id: string): void {
     getDb().run('DELETE FROM conversation_sessions WHERE id = ?', id);
@@ -607,6 +631,12 @@ export const inventoryRepo = {
     return getDb()
       .all<Row>('SELECT * FROM inventory_items WHERE player_id = ? ORDER BY acquired_at DESC', playerId)
       .map(rowToInventory);
+  },
+  /** Every inventory row across ALL players, including quantity-0. Inventory is
+   *  keyed per-world (player:<worldId>), so a faithful savegame export needs them
+   *  all, not just the legacy default player's. */
+  list(): InventoryItem[] {
+    return getDb().all<Row>('SELECT * FROM inventory_items ORDER BY acquired_at DESC').map(rowToInventory);
   },
   getByPlayerAndItem(playerId: string, shopItemId: string): InventoryItem | undefined {
     const r = getDb().get<Row>(
@@ -1128,6 +1158,30 @@ export const settingsRepo = {
   },
 };
 
+// --- prompt overrides (Prompt Editor; global, never exported) ----------------
+
+export const promptOverridesRepo = {
+  /** All saved overrides as a plain { promptId: text } map (the cache shape). */
+  getAll(): Record<string, string> {
+    const rows = getDb().all<Row>('SELECT prompt_id, override_text FROM prompt_overrides');
+    const out: Record<string, string> = {};
+    for (const r of rows) out[String(r.prompt_id)] = String(r.override_text);
+    return out;
+  },
+  set(promptId: string, text: string, when: number): void {
+    getDb().run(
+      `INSERT INTO prompt_overrides (prompt_id, override_text, updated_at) VALUES (?,?,?)
+       ON CONFLICT(prompt_id) DO UPDATE SET override_text = excluded.override_text, updated_at = excluded.updated_at`,
+      promptId,
+      text,
+      when,
+    );
+  },
+  remove(promptId: string): void {
+    getDb().run('DELETE FROM prompt_overrides WHERE prompt_id = ?', promptId);
+  },
+};
+
 // --- Faces: social feed (posts / comments / reactions / seen marker) --------
 
 function rowToFeedPost(r: Row): FeedPost {
@@ -1347,6 +1401,9 @@ function rowToNpcEdge(r: Row): NpcEdge {
     meetCount: Number(r.meet_count),
     lastDay: Number(r.last_day),
     promoted: Number(r.promoted) === 1,
+    romanceState: r.romance_state ?? 'none',
+    romanceSince: Number(r.romance_since ?? 0),
+    soured: Number(r.soured ?? 0) === 1,
   });
 }
 
@@ -1372,12 +1429,14 @@ export const npcEdgesRepo = {
   upsert(e: NpcEdge): NpcEdge {
     const { aId, bId } = npcPairKey(e.aId, e.bId);
     getDb().run(
-      `INSERT INTO npc_edges (world_id,a_id,b_id,warmth,meet_count,last_day,promoted)
-       VALUES (?,?,?,?,?,?,?)
+      `INSERT INTO npc_edges (world_id,a_id,b_id,warmth,meet_count,last_day,promoted,romance_state,romance_since,soured)
+       VALUES (?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(world_id,a_id,b_id) DO UPDATE SET
          warmth = excluded.warmth, meet_count = excluded.meet_count,
-         last_day = excluded.last_day, promoted = excluded.promoted`,
-      e.worldId, aId, bId, e.warmth, e.meetCount, e.lastDay, e.promoted ? 1 : 0,
+         last_day = excluded.last_day, promoted = excluded.promoted,
+         romance_state = excluded.romance_state, romance_since = excluded.romance_since,
+         soured = excluded.soured`,
+      e.worldId, aId, bId, e.warmth, e.meetCount, e.lastDay, e.promoted ? 1 : 0, e.romanceState, e.romanceSince, e.soured ? 1 : 0,
     );
     return { ...e, aId, bId };
   },

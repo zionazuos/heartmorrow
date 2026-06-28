@@ -22,7 +22,8 @@ import { charactersRepo, chroniclesRepo, messagesRepo, sessionsRepo, threadsRepo
 import { getDb } from '../db/index';
 import { newId, playerIdForWorldOrDefault } from '../lib/ids';
 import { badRequest } from '../lib/errors';
-import { getCharacter, listAcquaintances } from './character-service';
+import { withKeyedLock } from '../lib/keyed-lock';
+import { getCharacter, listAcquaintances, currentNpcPartners } from './character-service';
 import { readAssetFile } from './asset-service';
 import { getCharacterAvailability, currentAvailabilityFor, currentAvailabilityMap } from './availability-service';
 import { getRelationship } from './relationship-service';
@@ -158,6 +159,7 @@ export function listThreadSummaries(
       portraitAssetId: character?.portraitAssetId ?? null,
       lastBody: last?.body ?? null,
       lastAt: last ? last.deliveredAt ?? last.createdAt : thread.lastMessageAt,
+      lastFromPlayer: last?.sender === 'player',
       unread: thread.unreadCount,
       available: a?.available ?? true,
       unavailableReason: a?.reason ?? null,
@@ -322,27 +324,52 @@ export async function sendPlayerText(
     imageDataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
   }
 
-  const thread = getOrCreateThread(characterId, playerId);
-  const now = Date.now();
+  // Serialize per character so the player-insert + reply generation can't interleave
+  // with a concurrent send/retry for the same thread (two tabs, a double-fire) — which
+  // would otherwise duplicate the reply and double-apply the judge delta.
+  return withKeyedLock(`text-reply:${characterId}`, async () => {
+    const thread = getOrCreateThread(characterId, playerId);
+    const now = Date.now();
 
-  const playerMessage = textMessagesRepo.insert(
-    TextMessageSchema.parse({
-      id: newId('txt'),
-      threadId: thread.id,
-      sender: 'player',
-      body: text,
-      status: 'delivered',
-      dayNumber: day,
-      imageAssetId,
-      deliveredAt: now,
-      createdAt: now,
-    }),
-  );
-  threadsRepo.update({ ...thread, lastMessageAt: now, updatedAt: now });
+    const playerMessage = textMessagesRepo.insert(
+      TextMessageSchema.parse({
+        id: newId('txt'),
+        threadId: thread.id,
+        sender: 'player',
+        body: text,
+        status: 'delivered',
+        dayNumber: day,
+        imageAssetId,
+        deliveredAt: now,
+        createdAt: now,
+      }),
+    );
+    threadsRepo.update({ ...thread, lastMessageAt: now, updatedAt: now });
 
-  // Texting counts as staying in touch — reset the neglect clock.
-  if (character.worldId) stampLastSeen(characterId, day ?? 1);
+    // Texting counts as staying in touch — reset the neglect clock.
+    if (character.worldId) stampLastSeen(characterId, day ?? 1);
 
+    return generateTextReply(character, thread, playerMessage, day, imageDataUrl, playerId);
+  });
+}
+
+/**
+ * Generate (and persist) the character's reply to the player's most-recent text in
+ * a thread, then run the IMPARTIAL judge that moves the relationship. Shared by the
+ * initial send and the retry path — so a reply that failed the first time (the
+ * player's text is already saved) can be regenerated WITHOUT re-inserting (and
+ * duplicating) the player's message. Returns `{ reply: null, error }` on a model
+ * failure (the player's text stays put, ready to retry); never throws on a bad
+ * model response (callStructuredLlm fails safe).
+ */
+async function generateTextReply(
+  character: Character,
+  thread: MessageThread,
+  playerMessage: TextMessage,
+  day: number | null,
+  imageDataUrl: string | null,
+  playerId: string,
+): Promise<SendTextResult> {
   const settings = getLlmSettings();
   // Route image-bearing texts to the vision model (falls back to the main model
   // when none is configured); plain texts use the normal model untouched.
@@ -351,18 +378,18 @@ export async function sendPlayerText(
     : settings;
   const player = getOrCreatePlayer(playerIdForWorldOrDefault(character.worldId));
   const playerName = player.name;
-  const memories = selectTopMemories(characterId, 5);
+  const memories = selectTopMemories(character.id, 5);
   // The last 12 delivered texts (each carrying its in-world day so the reply can
   // flag stale plans), plus the folded cross-date history so the reply reflects
   // the last date the player and character actually shared.
-  const recentTexts = getRecentTexts(characterId, 12, playerId);
-  const chronicleRow = chroniclesRepo.getByCharacter(characterId, DEFAULT_PLAYER_ID);
+  const recentTexts = getRecentTexts(character.id, 12, playerId);
+  const chronicleRow = chroniclesRepo.getByCharacter(character.id, DEFAULT_PLAYER_ID);
   const chronicle = chronicleRow ? { chronicle: chronicleRow.chronicle, recentLines: chronicleRow.recentLines } : null;
   const result = await callStructuredLlm(
     TextReplySchema,
     buildTextReplyMessages({
       character,
-      relationship: getRelationship(characterId),
+      relationship: getRelationship(character.id),
       recentTexts,
       playerName,
       playerGender: player.gender,
@@ -370,6 +397,7 @@ export async function sendPlayerText(
       chronicle,
       memories,
       acquaintances: listAcquaintances(character),
+      npcPartnerNames: currentNpcPartners(character).map((p) => p.name),
       imageDataUrl,
       responseLanguage: effectiveSettings.responseLanguage,
     }),
@@ -377,7 +405,7 @@ export async function sendPlayerText(
   );
 
   if (!result.ok) {
-    recordEvent('text_reply_failed', { characterId, error: result.error });
+    recordEvent('text_reply_failed', { characterId: character.id, error: result.error });
     return { playerMessage, reply: null, error: result.error, relationshipDelta: {} };
   }
 
@@ -395,7 +423,7 @@ export async function sendPlayerText(
     }),
   );
   threadsRepo.update({ ...thread, lastMessageAt: replyAt, updatedAt: replyAt });
-  recordEvent('text_reply', { characterId, tone: result.data.tone });
+  recordEvent('text_reply', { characterId: character.id, tone: result.data.tone });
 
   // How the relationship moves is decided by an IMPARTIAL judge of how the
   // PLAYER's text landed — NOT by the character's self-reported reply tone (a
@@ -407,15 +435,18 @@ export async function sendPlayerText(
   let applied: Partial<Record<RelationshipStatKey, number>> = {};
   const judge = await callStructuredLlm(
     TextJudgeSchema,
-    buildTextJudgeMessages({ character, relationship: getRelationship(characterId), recentTexts, playerName, memories, imageDataUrl }),
-    { settings: effectiveSettings, task: "Judge how the player's most recent text landed for this character.", schemaName: 'TextJudge' },
+    buildTextJudgeMessages({ character, relationship: getRelationship(character.id), recentTexts, playerName, memories, imageDataUrl }),
+    // Floor the output budget so a chatty `note` can't truncate the JSON mid-string
+    // (the evaluator role runs a small maxTokens; without this the parse fails and
+    // the player's text silently costs nothing). See the session evaluator for the same guard.
+    { settings: effectiveSettings, role: 'evaluator', minMaxTokens: 512, task: "Judge how the player's most recent text landed for this character.", schemaName: 'TextJudge' },
   );
   if (judge.ok) {
     const base = textEngagementDelta(judge.data.engagement);
     const gain = positiveWarmth(base);
     applied = base;
     if (gain > 0) {
-      const rel = getRelationship(characterId);
+      const rel = getRelationship(character.id);
       const bucket = day ?? 0;
       const usedToday =
         rel.flags['text:gainDay'] === bucket && typeof rel.flags['text:gainAmt'] === 'number'
@@ -426,12 +457,12 @@ export async function sendPlayerText(
       const { delta: capped, applied: spent } = capWarmthGain(base, TEXT_DAILY_GAIN_CAP - usedToday);
       applied = capped;
       if (spent > 0) {
-        setRelationshipFlag(characterId, 'text:gainDay', bucket, { source: 'text' });
-        setRelationshipFlag(characterId, 'text:gainAmt', usedToday + spent, { source: 'text' });
+        setRelationshipFlag(character.id, 'text:gainDay', bucket, { source: 'text' });
+        setRelationshipFlag(character.id, 'text:gainAmt', usedToday + spent, { source: 'text' });
       }
     }
     if (Object.keys(applied).length > 0) {
-      applyRelationshipChange(characterId, applied, {
+      applyRelationshipChange(character.id, applied, {
         source: 'text',
         detail: { engagement: judge.data.engagement, hostile: judge.data.hostile },
       });
@@ -440,10 +471,61 @@ export async function sendPlayerText(
     }
   } else {
     // Fail safe: an unreadable judge response leaves the relationship untouched.
-    recordEvent('text_judge_failed', { characterId, error: judge.error });
+    recordEvent('text_judge_failed', { characterId: character.id, error: judge.error });
   }
 
   return { playerMessage, reply, error: null, relationshipDelta: applied };
+}
+
+/**
+ * Retry the character's reply after a send whose reply failed to generate. The
+ * player's text is already saved (the send persists it BEFORE asking the model),
+ * so this regenerates the reply against the existing thread WITHOUT inserting a
+ * second copy of the player's message. Idempotent-ish: if the thread's last
+ * message is already a character reply (a prior retry landed, or a race), it
+ * returns that reply untouched rather than generating another.
+ */
+export async function retryPlayerTextReply(
+  characterId: string,
+  playerId: string = DEFAULT_PLAYER_ID,
+): Promise<SendTextResult> {
+  const character = getCharacter(characterId);
+  if (isMemorialized(getRelationship(characterId))) {
+    throw badRequest(`${character.name} is no longer with us.`);
+  }
+  if (!hasDated(characterId)) {
+    throw badRequest(`You can only text someone you've been on a date with.`);
+  }
+  // Same per-character lock as sendPlayerText: re-evaluate the trailing message
+  // INSIDE the critical section so two concurrent retries (or a retry racing a
+  // send) can't both generate — the second sees the reply and no-ops.
+  return withKeyedLock(`text-reply:${characterId}`, async () => {
+    const thread = getOrCreateThread(characterId, playerId);
+    const msgs = textMessagesRepo.listDeliveredByThread(thread.id);
+    const last = msgs[msgs.length - 1];
+    if (!last) throw badRequest('There’s nothing here to reply to yet.');
+    // Already answered — return the existing reply (and its prompting player text)
+    // so a double-tap / race is a harmless no-op rather than a duplicate reply.
+    if (last.sender === 'character') {
+      const lastPlayer = [...msgs].reverse().find((m) => m.sender === 'player');
+      return { playerMessage: lastPlayer ?? last, reply: last, error: null, relationshipDelta: {} };
+    }
+    // A gift text always persists its reaction reply atomically with the player
+    // message, so an unanswered trailing text is never a gift — guard anyway.
+    if (last.attachment) throw badRequest('That message has already been handled.');
+    const day = character.worldId ? ensureWorldState(character.worldId).day : null;
+    // Rebuild the attached photo (if any) so the regenerated reply still reacts to it.
+    let imageDataUrl: string | null = null;
+    if (last.imageAssetId) {
+      try {
+        const { buffer, mimeType } = readAssetFile(last.imageAssetId);
+        imageDataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+      } catch {
+        imageDataUrl = null; // the asset is gone — reply to the text alone
+      }
+    }
+    return generateTextReply(character, thread, last, day, imageDataUrl, playerId);
+  });
 }
 
 export function claimTextGift(textId: string, playerId: string = DEFAULT_PLAYER_ID) {

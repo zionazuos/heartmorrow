@@ -1,89 +1,85 @@
-import { useEffect, useState } from 'react';
-import type { ActivityDef, Character } from '@dsim/shared';
-import { type RelationshipStatKey } from '@dsim/shared';
+import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  CAREER_SKILLS,
+  careerProgress,
+  isCareerSkill,
+  masteryMult,
+  type ActivityDef,
+  type MinigameInfo,
+  type MinigameSubmission,
+} from '@dsim/shared';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
-import { useT, type TFunc } from '../../i18n';
-import { relStatLabel } from '../../i18n/sharedLabels';
+import { careerSkillLabel, phaseLabel } from '../../i18n/labels';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
-import { PortraitPicker } from '../PortraitPicker';
 import { Banner } from '../ui';
+import { GameView, type ActiveGame } from '../minigames/GameView';
 import './phone-life.css';
 
-/** Translate a stat key + numeric value into a warm, feeling-first phrase. */
-function trainingNote(stat: RelationshipStatKey | undefined, value: number | undefined, t: TFunc): string {
-  if (!stat) return t('work.note.default');
-  const label = relStatLabel(t, stat);
-  if (stat === 'tension') {
-    // Tension rising is usually a negative signal.
-    return value != null && value > 50 ? t('work.note.tensionHigh', { label }) : t('work.note.tensionLow');
-  }
-  if (value == null) return t('work.note.warmedNoVal', { label });
-  if (value >= 80) return t('work.note.flourishing', { label });
-  if (value >= 60) return t('work.note.closer', { label });
-  if (value >= 40) return t('work.note.goodHour', { label });
-  return t('work.note.slow', { label });
-}
-
 export function WorkApp() {
-  const t = useT();
-  const { activeWorldId, reloadPlayer, refreshWorldState, worldState, dayTick, activeDate } = useAppData();
+  const { t } = useTranslation(['phone', 'common']);
+  const { activeWorldId, reloadPlayer, refreshWorldState, worldState, dayTick, activeDate, player } = useAppData();
   const [activities, setActivities] = useState<ActivityDef[]>([]);
-  const [allCharacters, setAllCharacters] = useState<Character[]>([]);
-  const [target, setTarget] = useState<string | null>(null);
+  const [jobGames, setJobGames] = useState<MinigameInfo[]>([]);
+  const [active, setActive] = useState<ActiveGame | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string>();
   const [error, setError] = useState<string>();
-  // No actions left today — gate the tiles up front instead of letting the POST 400.
-  const noEnergy = (worldState?.stamina ?? 0) <= 0;
-  // You can't clock in or train while you're out on a date — finish it first.
+  // A skill-work shift can only be finished once even if the game fires twice.
+  const finishingRef = useRef(false);
+
+  const stamina = worldState?.stamina ?? 0;
+  const noEnergy = stamina <= 0;
   const onDate = !!activeDate;
 
   useEffect(() => {
+    // A new day ends any half-finished shift left on screen.
+    setActive(null);
+    finishingRef.current = false;
     api.listActivities().then(setActivities).catch(() => undefined);
-    api.listCharacters().then(setAllCharacters).catch(() => undefined);
+    // Job games (paid skill work) live HERE, not the dating arcade.
+    api.listMinigames().then((g) => setJobGames(g.filter((x) => x.mode === 'job'))).catch(() => undefined);
   }, [dayTick]);
 
-  // Training happens in the active world, so only offer its characters.
-  const characters = allCharacters.filter((c) => c.worldId === activeWorldId);
+  // A world switch must not leave a previous world's run on screen — finishing it would
+  // reconcile its reward into that world while the HUD now reflects the new one. Mirrors
+  // the guard in the Arcade (Minigames.tsx).
+  const lastWorldRef = useRef(activeWorldId);
   useEffect(() => {
-    if (characters.length && (target === null || !characters.some((c) => c.id === target))) {
-      setTarget(characters[0]!.id);
-    }
-  }, [characters, target]);
+    if (lastWorldRef.current === activeWorldId) return;
+    lastWorldRef.current = activeWorldId;
+    setActive(null);
+    finishingRef.current = false;
+  }, [activeWorldId]);
+
+  /** This world's level in a career skill (0 if never worked it). */
+  const lvl = (skill?: string): number =>
+    skill && isCareerSkill(skill) ? player?.career?.[skill]?.level ?? 0 : 0;
+  const skillName = (skill?: string): string => (skill && isCareerSkill(skill) ? careerSkillLabel(skill) : '');
 
   const perform = async (a: ActivityDef) => {
     if (!activeWorldId) {
-      setError(t('work.err.pickWorld'));
+      setError(t('work.errWorld'));
       return;
     }
     if (onDate) {
-      setError(t('work.err.onDate', { name: activeDate!.characterName }));
-      return;
-    }
-    if (a.kind === 'training' && !target) {
-      setError(t('work.err.chooseSomeone'));
+      setError(t('work.errOnDate', { name: activeDate!.characterName }));
       return;
     }
     setBusy(true);
     setNote(undefined);
     setError(undefined);
     try {
-      const res = await api.performActivity({
-        activityId: a.id,
-        worldId: activeWorldId,
-        characterId: a.kind === 'training' ? target : null,
-      });
+      const res = await api.performActivity({ activityId: a.id, worldId: activeWorldId, characterId: null });
       await Promise.all([reloadPlayer(), refreshWorldState()]);
-      if (a.kind === 'work') {
-        setNote(t('work.earned', { money: res.money, day: res.state.day, phase: res.state.phase }));
-      } else {
-        const stat = a.relationshipStat;
-        const now = stat && res.relationship ? res.relationship[stat] : undefined;
-        setNote(trainingNote(stat, now, t));
-      }
+      const lifted =
+        res.skillLeveledUp && isCareerSkill(res.skill)
+          ? t('work.leveledUp', { skill: careerSkillLabel(res.skill), level: res.skillLevel })
+          : '';
+      setNote(t('work.earned', { lifted, money: res.money, day: res.state.day, phase: phaseLabel(res.state.phase) }));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -91,17 +87,73 @@ export function WorkApp() {
     }
   };
 
-  const work = activities.filter((a) => a.kind === 'work');
-  const training = activities.filter((a) => a.kind === 'training');
+  const startJob = async (g: MinigameInfo) => {
+    if (!activeWorldId) {
+      setError(t('work.errWorld'));
+      return;
+    }
+    if (onDate) {
+      setError(t('work.errOnDate', { name: activeDate!.characterName }));
+      return;
+    }
+    setBusy(true);
+    setNote(undefined);
+    setError(undefined);
+    try {
+      // Skill work is impersonal — never tied to a character.
+      const res = await api.startMinigame({ minigameId: g.id, characterId: null, worldId: activeWorldId });
+      setActive({ minigameId: g.id, runId: res.runId, config: res.config });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
-  const partnerOptions = characters.map((c) => ({
-    id: c.id,
-    character: c,
-  }));
+  const finishJob = async (submission: MinigameSubmission) => {
+    if (!active || finishingRef.current) return;
+    finishingRef.current = true;
+    setBusy(true);
+    try {
+      const title = jobGames.find((g) => g.id === active.minigameId)?.title ?? t('work.shiftFallback');
+      const res = await api.finishMinigame({ runId: active.runId, submission });
+      setActive(null);
+      await Promise.all([reloadPlayer(), refreshWorldState()]);
+      const r = res.result;
+      const earned = r.reward.money > 0 ? t('work.earnedShort', { money: r.reward.money }) : t('work.noPay');
+      setNote(t('work.shiftResult', { title, grade: r.grade, score: r.score, earned }));
+    } catch (e) {
+      setError(errorMessage(e));
+      setActive(null);
+    } finally {
+      setBusy(false);
+      finishingRef.current = false;
+    }
+  };
+
+  // On shift: the play surface takes over the whole app body.
+  if (active) {
+    return (
+      <div className="phone-app">
+        <PhoneAppBar title={t('work.title')} kicker={t('work.onShift')} icon="work" />
+        <div className="phone-embed pl-work-embed">
+          <div className="pl-job-stage-head">
+            <span className="pl-eyebrow">{t('work.onShiftHead', { title: jobGames.find((g) => g.id === active.minigameId)?.title ?? '' })}</span>
+            <button className="btn sm ghost danger" onClick={() => setActive(null)} disabled={busy}>
+              {t('work.quit')}
+            </button>
+          </div>
+          <GameView active={active} partner={null} onComplete={finishJob} />
+        </div>
+      </div>
+    );
+  }
+
+  const work = activities.filter((a) => a.kind === 'work');
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title={t('work.title')} kicker={t('work.kicker')} icon="work" />
+      <PhoneAppBar title={t('work.title')} kicker={t('work.daysShifts')} icon="work" />
       <div className="phone-embed pl-work-embed">
         {(note || error) && (
           <div className="pl-work-banner">
@@ -111,56 +163,152 @@ export function WorkApp() {
         )}
 
         <div className="pl-board">
-          <p className="pl-board-note">{t('work.boardNote')}</p>
+          <p className="pl-board-note">
+            {t('work.boardNote')}
+          </p>
           {noEnergy && <p className="pl-board-note">{t('work.noEnergy')}</p>}
           {onDate && (
-            <p className="pl-board-note">{t('work.onDateNote', { name: activeDate!.characterName })}</p>
+            <p className="pl-board-note">
+              {t('work.onDateNote', { name: activeDate!.characterName })}
+            </p>
           )}
         </div>
 
-        <div className="pl-eyebrow">{t('work.shiftsHead')}</div>
-        {work.map((a) => (
-          <div className="pl-tile pl-work" key={a.id}>
-            <div className="pl-tile-icon"><Icon name="work" size={18} /></div>
-            <div className="pl-tile-body">
-              <div className="pl-tile-label">{a.label}</div>
-              <div className="pl-tile-desc">{a.description}</div>
-            </div>
-            <div className="pl-tile-action">
-              <button className="btn sm primary" onClick={() => perform(a)} disabled={busy || noEnergy || onDate}>
-                <span className="pl-coin">◈ {a.money}</span>
-              </button>
-            </div>
-          </div>
-        ))}
+        {/* --- Career skills ------------------------------------------------ */}
+        <div className="pl-eyebrow">{t('work.skillsHead')}</div>
+        <div className="pl-skills">
+          {CAREER_SKILLS.map((s) => {
+            const p = careerProgress(player?.career?.[s]?.xp ?? 0);
+            return (
+              <div className="pl-skill" key={s}>
+                <div className="pl-skill-head">
+                  <span className="pl-skill-name">{careerSkillLabel(s)}</span>
+                  <span className="pl-skill-lv">
+                    {t('work.level', { level: p.level })}
+                    {p.atMax ? t('work.maxSuffix') : ''} · ×{masteryMult(p.level).toFixed(2)}
+                  </span>
+                </div>
+                <div className="pl-skill-bar">
+                  <span style={{ width: `${Math.round(p.pct * 100)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-        <div className="pl-eyebrow">{t('work.trainingHead')}</div>
-        {partnerOptions.length > 0 && (
-          <div className="pl-partner-pick">
-            <div className="pl-partner-label">{t('work.with')}</div>
-            <PortraitPicker
-              options={partnerOptions}
-              value={target}
-              onChange={(id) => setTarget(id)}
-              compact
-            />
+        {/* --- Flat shifts -------------------------------------------------- */}
+        <div className="pl-eyebrow">{t('work.shiftsHead')}</div>
+        {worldState && (
+          <div className={`pl-energy-readout${noEnergy ? ' is-spent' : ''}`}>
+            <span>◆</span>
+            <span>
+              {t('work.energyLeft', { stamina: worldState.stamina, max: worldState.staminaMax })}
+            </span>
           </div>
         )}
-        {training.map((a) => (
-          <div className="pl-tile pl-train" key={a.id}>
-            <div className="pl-tile-icon"><Icon name="sparkle" size={18} /></div>
-            <div className="pl-tile-body">
-              <div className="pl-tile-label">{a.label}</div>
-              <div className="pl-tile-desc">{a.description}</div>
+        {work.map((a) => {
+          const cost = a.staminaCost ?? 1;
+          const reqLocked =
+            isCareerSkill(a.requiresSkill) && lvl(a.requiresSkill) < (a.requiresLevel ?? 0);
+          const cantAfford = stamina < cost;
+          const v = a.moneyVariance ?? 0;
+          const base = a.money ?? 0;
+          const m = masteryMult(lvl(a.skill));
+          const loMult = (a.weatherPriced ? 0.85 : 1) * m;
+          const hiMult = (a.weatherPriced ? 1.4 : 1) * m;
+          const payLabel =
+            v > 0 || a.weatherPriced
+              ? `◈ ${Math.round(base * loMult * (1 - v))}–${Math.round(base * hiMult * (1 + v))}`
+              : `◈ ${Math.round(base * m)}`;
+          return (
+            <div className={`pl-tile pl-work${reqLocked ? ' is-locked' : ''}`} key={a.id}>
+              <div className="pl-tile-icon"><Icon name="work" size={18} /></div>
+              <div className="pl-tile-body">
+                <div className="pl-tile-label">{a.label}</div>
+                <div className="pl-tile-desc">{a.description}</div>
+                <div className="pl-work-tags">
+                  {isCareerSkill(a.skill) && <span className="pl-work-tag">{skillName(a.skill)}</span>}
+                  {v > 0 && <span className="pl-work-tag">{t('work.payVaries')}</span>}
+                  {a.weatherPriced && <span className="pl-work-tag">{t('work.weatherPriced')}</span>}
+                  {reqLocked && (
+                    <span className="pl-work-tag locked">
+                      {t('work.lockedTag', { skill: skillName(a.requiresSkill), level: a.requiresLevel })}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="pl-tile-action">
+                <span className="pl-tile-cost" title={t('work.costTitle', { count: cost })}>
+                  −{cost} ◆
+                </span>
+                <button
+                  className="btn sm primary"
+                  onClick={() => perform(a)}
+                  disabled={busy || cantAfford || onDate || reqLocked}
+                  title={
+                    reqLocked
+                      ? t('work.lockedTitle', { skill: skillName(a.requiresSkill), level: a.requiresLevel })
+                      : cantAfford && !noEnergy
+                        ? t('work.needEnergyTitle', { cost, stamina })
+                        : undefined
+                  }
+                >
+                  <span className="pl-coin">{payLabel}</span>
+                </button>
+              </div>
             </div>
-            <div className="pl-tile-action">
-              <button className="btn sm" onClick={() => perform(a)} disabled={busy || !target || noEnergy || onDate}>
-                <span className="pl-coin">+{a.amount}</span>
-                {a.relationshipStat ? ` ${relStatLabel(t, a.relationshipStat)}` : ''}
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
+
+        {/* --- Skill work (job minigames) ---------------------------------- */}
+        {jobGames.length > 0 && (
+          <>
+            <div className="pl-eyebrow">{t('work.skillWorkHead')}</div>
+            {jobGames.map((g) => {
+              const reqLocked =
+                isCareerSkill(g.requiresSkill) && lvl(g.requiresSkill) < (g.requiresLevel ?? 0);
+              const potential = Math.min(250, Math.round(100 * masteryMult(lvl(g.skill))));
+              return (
+                <div className={`pl-tile pl-work pl-job${reqLocked ? ' is-locked' : ''}`} key={g.id}>
+                  <div className="pl-tile-icon"><Icon name="games" size={18} /></div>
+                  <div className="pl-tile-body">
+                    <div className="pl-tile-label">{g.title}</div>
+                    <div className="pl-tile-desc">{g.description}</div>
+                    <div className="pl-work-tags">
+                      {isCareerSkill(g.skill) && (
+                        <span className="pl-work-tag">
+                          {skillName(g.skill)}
+                          {lvl(g.skill) > 0 ? ` Lv ${lvl(g.skill)}` : ''}
+                        </span>
+                      )}
+                      <span className="pl-work-tag">{t('work.skillGraded')}</span>
+                      {reqLocked && (
+                        <span className="pl-work-tag locked">
+                          {t('work.lockedTag', { skill: skillName(g.requiresSkill), level: g.requiresLevel })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="pl-tile-action">
+                    <span className="pl-tile-cost" title={t('work.costOneTitle')}>−1 ◆</span>
+                    <button
+                      className="btn sm primary"
+                      onClick={() => startJob(g)}
+                      disabled={busy || noEnergy || onDate || reqLocked}
+                      title={
+                        reqLocked
+                          ? t('work.lockedTitle', { skill: skillName(g.requiresSkill), level: g.requiresLevel })
+                          : undefined
+                      }
+                    >
+                      <span className="pl-coin">{t('work.upTo', { potential })}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );

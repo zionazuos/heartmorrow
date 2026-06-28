@@ -1,36 +1,28 @@
 import { useEffect, useState } from 'react';
-import type { FeedPostView, ReactionKind } from '@dsim/shared';
+import type { ParseKeys } from 'i18next';
+import { useTranslation } from 'react-i18next';
+import { GEN_TEXT, type FeedPostView, type ReactionKind } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
-import { useT, type TFunc } from '../../i18n';
-import type { MessageKey } from '../../i18n/locales/en';
+import { relativeTime } from '../../i18n/labels';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Portrait } from '../Portrait';
 import { Banner, Spinner } from '../ui';
 import './phone-faces.css';
 
-/** Relative time for a feed timestamp (mirrors MomentsApp's `ago`). */
-function ago(ts: number, t: TFunc): string {
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60) return t('profile.ago.justNow');
-  const m = Math.floor(s / 60);
-  if (m < 60) return t('profile.ago.minutes', { m });
-  const h = Math.floor(m / 60);
-  if (h < 24) return t('profile.ago.hours', { h });
-  return t('profile.ago.days', { d: Math.floor(h / 24) });
-}
+type PhoneKey = ParseKeys<'phone'>;
 
 /** The reaction palette, in the order shown on a post.
- *  Glyphs use <Icon> (chrome); labels remain readable text. */
-const REACTIONS: ReadonlyArray<{ kind: ReactionKind; icon: Parameters<typeof Icon>[0]['name']; labelKey: MessageKey }> = [
-  { kind: 'like',  icon: 'reactLike',  labelKey: 'faces.react.like' },
-  { kind: 'love',  icon: 'reactLove',  labelKey: 'faces.react.love' },
-  { kind: 'laugh', icon: 'reactLaugh', labelKey: 'faces.react.laugh' },
-  { kind: 'wow',   icon: 'reactWow',   labelKey: 'faces.react.wow' },
-  { kind: 'sad',   icon: 'reactSad',   labelKey: 'faces.react.sad' },
-  { kind: 'angry', icon: 'reactAngry', labelKey: 'faces.react.angry' },
+ *  Glyphs use <Icon> (chrome); labels resolve from `faces.react.<kind>`. */
+const REACTIONS: ReadonlyArray<{ kind: ReactionKind; icon: Parameters<typeof Icon>[0]['name'] }> = [
+  { kind: 'like',  icon: 'reactLike'  },
+  { kind: 'love',  icon: 'reactLove'  },
+  { kind: 'laugh', icon: 'reactLaugh' },
+  { kind: 'wow',   icon: 'reactWow'   },
+  { kind: 'sad',   icon: 'reactSad'   },
+  { kind: 'angry', icon: 'reactAngry' },
 ];
 
 const REACTION_ICON: Record<ReactionKind, Parameters<typeof Icon>[0]['name']> = {
@@ -43,7 +35,7 @@ const REACTION_ICON: Record<ReactionKind, Parameters<typeof Icon>[0]['name']> = 
 };
 
 /** Posts that aren't plain statuses get a tinted label + edge to set the mood. */
-const KIND_HINT: Partial<Record<FeedPostView['kind'], { labelKey: MessageKey; tone: string }>> = {
+const KIND_HINT: Partial<Record<FeedPostView['kind'], { labelKey: PhoneKey; tone: string }>> = {
   jealousy:  { labelKey: 'faces.kind.jealousy',  tone: 'rose' },
   breakup:   { labelKey: 'faces.kind.breakup',   tone: 'rose' },
   reconcile: { labelKey: 'faces.kind.reconcile', tone: 'sage' },
@@ -52,7 +44,7 @@ const KIND_HINT: Partial<Record<FeedPostView['kind'], { labelKey: MessageKey; to
 };
 
 export function FacesApp() {
-  const t = useT();
+  const { t } = useTranslation(['phone', 'common']);
   const { activeWorldId, dayTick } = useAppData();
   const [loading, setLoading] = useState(true);
   const [posts, setPosts] = useState<FeedPostView[]>([]);
@@ -107,7 +99,7 @@ export function FacesApp() {
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title={t('phone.app.faces')} kicker={t('faces.kicker')} icon="faces" />
+      <PhoneAppBar title={t('faces.title')} kicker={t('faces.kicker')} icon="faces" />
 
       {!activeWorldId ? (
         <div className="fcs-empty">
@@ -125,11 +117,14 @@ export function FacesApp() {
               value={draft}
               placeholder={t('faces.composePlaceholder')}
               rows={2}
-              maxLength={500}
+              maxLength={GEN_TEXT.line}
               onChange={(e) => setDraft(e.target.value)}
               disabled={posting}
             />
             <div className="fcs-compose-foot">
+              <span className={`fcs-compose-count${draft.length > 450 ? ' is-near' : ''}`} aria-hidden="true">
+                {draft.length}/500
+              </span>
               <button
                 className="btn primary sm fcs-post-btn"
                 onClick={submitPost}
@@ -151,7 +146,7 @@ export function FacesApp() {
           ) : (
             <div className="fcs-feed">
               {posts.map((post) => (
-                <PostCard key={post.id} post={post} onUpdate={replacePost} t={t} />
+                <PostCard key={post.id} post={post} onUpdate={replacePost} />
               ))}
             </div>
           )}
@@ -164,12 +159,11 @@ export function FacesApp() {
 function PostCard({
   post,
   onUpdate,
-  t,
 }: {
   post: FeedPostView;
   onUpdate: (updated: FeedPostView) => void;
-  t: TFunc;
 }) {
+  const { t } = useTranslation(['phone', 'common']);
   const [busy, setBusy] = useState(false);
   const hint = KIND_HINT[post.kind];
   const isNpc = post.authorType === 'character';
@@ -198,7 +192,7 @@ function PostCard({
         <span className="fcs-head-meta">
           <span className="fcs-author">{post.authorName}</span>
           <span className="fcs-sub">
-            {post.dayNumber != null ? t('dash.hud.day', { day: post.dayNumber }) : ago(post.createdAt, t)}
+            {post.dayNumber != null ? t('faces.day', { day: post.dayNumber }) : relativeTime(post.createdAt)}
             {hint && <span className={`fcs-kind fcs-kind-${hint.tone}`}>{t(hint.labelKey)}</span>}
           </span>
         </span>
@@ -207,32 +201,31 @@ function PostCard({
       <p className="fcs-body">{post.body}</p>
       {post.mood && <div className="fcs-mood">— {post.mood}</div>}
 
-      <ReactionSummary post={post} t={t} />
+      <ReactionSummary post={post} />
 
       <div className="fcs-react-bar">
-        {REACTIONS.map((r) => {
-          const label = t(r.labelKey);
-          return (
-            <button
-              key={r.kind}
-              className={`fcs-react${post.playerReaction === r.kind ? ' is-on' : ''}`}
-              onClick={() => react(r.kind)}
-              disabled={busy}
-              title={label}
-              aria-label={label}
-            >
-              <Icon name={r.icon} size={18} />
-            </button>
-          );
-        })}
+        {REACTIONS.map((r) => (
+          <button
+            key={r.kind}
+            className={`fcs-react${post.playerReaction === r.kind ? ' is-on' : ''}`}
+            onClick={() => react(r.kind)}
+            disabled={busy}
+            title={t(`faces.react.${r.kind}`)}
+            aria-label={t(`faces.react.${r.kind}`)}
+            aria-pressed={post.playerReaction === r.kind}
+          >
+            <Icon name={r.icon} size={18} />
+          </button>
+        ))}
       </div>
 
-      <CommentList post={post} onUpdate={onUpdate} allowComment={isNpc} t={t} />
+      <CommentList post={post} onUpdate={onUpdate} allowComment={isNpc} />
     </article>
   );
 }
 
-function ReactionSummary({ post, t }: { post: FeedPostView; t: TFunc }) {
+function ReactionSummary({ post }: { post: FeedPostView }) {
+  const { t } = useTranslation(['phone', 'common']);
   const live = post.reactions.filter((r) => r.count > 0);
   if (live.length === 0) return null;
   const names = live
@@ -251,7 +244,9 @@ function ReactionSummary({ post, t }: { post: FeedPostView; t: TFunc }) {
       </span>
       <span className="fcs-react-names">
         {names.length > 0
-          ? `${names.join(', ')}${total > names.length ? t('faces.andMore', { count: total - names.length }) : ''}`
+          ? total > names.length
+            ? t('faces.andMore', { names: names.join(', '), count: total - names.length })
+            : names.join(', ')
           : total}
       </span>
     </div>
@@ -262,13 +257,12 @@ function CommentList({
   post,
   onUpdate,
   allowComment,
-  t,
 }: {
   post: FeedPostView;
   onUpdate: (updated: FeedPostView) => void;
   allowComment: boolean;
-  t: TFunc;
 }) {
+  const { t } = useTranslation(['phone', 'common']);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -310,8 +304,8 @@ function CommentList({
           <input
             className="fcs-comment-input"
             value={text}
-            placeholder={t('faces.commentPlaceholder')}
-            maxLength={400}
+            placeholder={t('faces.addComment')}
+            maxLength={GEN_TEXT.line}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {

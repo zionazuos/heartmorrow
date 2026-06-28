@@ -17,6 +17,8 @@ keys never leave your computer.
 > and explore the entire UI without an LLM connected. You only need one running to actually
 > *talk* to characters and simulate the world.
 
+Hop in the [Discord](https://discord.gg/S9NUYM82tP) if you want to share your characters, get pro-tips, and discuss the game with others.
+
 ---
 
 ![Screenshot of Heartmorrow dating gameplay.](https://github.com/Heartmorrow/heartmorrow-sim/raw/master/gh/1.png)
@@ -45,11 +47,12 @@ holidays — **First Bloom** (Spring), **Midsummer Night** (Summer), the **Lante
 the calendar, the social feed, and your dates.
 
 - **Energy economy.** Each day gives you a small action pool — **3 actions (4 on
-  weekends)**. A date, a paid event, a work/training session, and a minigame each spend one;
+  weekends)**. A date, a paid event, a work shift, time spent with someone (Together), and a minigame each spend one;
   plain texting and chatting are free. Time-of-day phases aren't just decor — they advance as
   you spend energy, get pinned as hard facts in date scenes, and gate when characters' texts
-  arrive. When you're out of energy, **Sleep** to end the day: you get a written recap, a
-  small passive income, the day's events around town, and a fresh morning with new weather.
+  arrive. When you're out of energy, **Sleep** to end the day: you get a written recap, the
+  day's events around town, and a fresh morning with new weather. Money isn't handed out —
+  you earn it from work and minigames (or from wealth holdings you own).
 - **Deterministic weather + moods.** Every world day has forecastable weather (browse a
   5-day forecast in the Weather app), and every character has a **mood of the day** plus
   weather they love or hate — which nudges how a date goes.
@@ -119,8 +122,11 @@ A whole home screen of apps:
 - **Social** — a browsable map of the cast's ties to each other and to you.
 - **Moments** — a polaroid scrapbook of your relationship highlights.
 - **Endings** — your gallery of earned epilogues.
-- **Work & Training** — pick up shifts for money, or spend an action training a relationship
-  stat.
+- **Work** — pick up shifts for money.
+- **Together** — give an afternoon to someone: time spent grows a bond, but who they are
+  (fit), how bold the outing is (risk), and how often you've leaned on them that day (a
+  daily cap) all shape it — and casual time alone never reaches the romantic bands, only a
+  real date does.
 - **Settings** — accent colors, wallpaper, play/creator mode, and a total reset.
 - Plus optional, world-gated money apps (**Property**, **Market**, **Casino** — see below)
   and quick access to **Shop**, **Games**, and your **Bag**.
@@ -161,7 +167,7 @@ partners) plus an off-screen world-sim means the cast knows each other:
 
 ### 💰 Optional money systems
 
-Work and quality-time **Training** are always on. Each world's creator can also switch on
+Work and **Together** (time spent with people) are always on. Each world's creator can also switch on
 three richer, opt-in systems (all **OFF by default**):
 
 - **Property** — lease or buy in-world places, collect rent, and date somewhere you hold for
@@ -193,6 +199,10 @@ grant itself a cent.
 
 ## Requirements
 
+> **Using the [self-contained installer](#quick-start)?** You can skip the Node and pnpm
+> requirements below — `install.sh` / `install.ps1` download a pinned, local Node and activate
+> the right pnpm for you. The only thing you'd still want is an LLM server to actually play.
+
 - **Node.js 20+** (developed on Node 24). Uses Node's built-in `node:sqlite`, so installation
   never compiles a native C addon.
 - **pnpm** — the repo pins **`pnpm@11.7.0`** via `packageManager`, so running `corepack
@@ -202,6 +212,43 @@ grant itself a cent.
 ---
 
 ## Quick start
+
+The fastest way in is the **self-contained installer**. It needs *no prerequisites* — not
+even Node or pnpm. It downloads a pinned, official Node.js into a local `./.runtime/node`
+folder (verified against nodejs.org's SHA-256 checksums, nothing installed system-wide),
+activates the exact pnpm pinned in `package.json` via corepack, installs dependencies, and
+seeds the sample database. Then a matching `run` script starts the app.
+
+**macOS / Linux**
+
+```bash
+./install.sh      # one-time setup (downloads Node locally, installs, seeds)
+./run.sh          # start the server + web client
+```
+
+**Windows**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1   # one-time setup
+.\run.bat                                                # start the app
+```
+
+> **Unattended/CI?** Pass `-y`/`--yes` to `install.sh` (or `-Yes` to `install.ps1`), or set
+> `HEARTMORROW_YES=1`, to skip the Node-download confirmation prompt.
+
+> **📱 Works on Termux, too.** The Linux installer runs as-is under
+> [Termux](https://termux.dev/) on Android — `./install.sh` then `./run.sh` — so you can host
+> Heartmorrow right on your phone and play it from the device's browser. (Point it at a local
+> or remote LLM the same way you would anywhere else.)
+
+Both installers are **idempotent** — re-run them anytime; they skip the Node download if the
+vendored copy is already present.
+
+Then open **http://localhost:5173**.
+
+### Manual install
+
+Already have **Node.js 20+** and **pnpm**? Skip the installer and run the steps yourself:
 
 ```bash
 # 1. Install everything
@@ -232,6 +279,28 @@ The Vite dev server proxies `/api` and `/uploads` to the API server on
 > **Want a furnished demo?** `pnpm mock` builds an isolated showcase world in `data/mock`
 > (a separate save), and `pnpm dev:mock` runs against it — handy for screenshots without
 > touching your real game.
+
+### Run only the API (no frontend)
+
+If you just want the backend — to drive it from your own client, hit the HTTP API
+directly, or run headless — start the server package on its own:
+
+```bash
+# API with auto-reload (tsx watch), the way `pnpm dev` runs it
+pnpm --filter @dsim/server run dev
+
+# API once, no file watching (good for scripts / production-ish runs)
+pnpm --filter @dsim/server run start
+
+# Against the mock showcase world
+pnpm --filter @dsim/server run dev:mock     # watch
+pnpm --filter @dsim/server run start:mock   # no watch
+```
+
+The API listens on **http://localhost:8787** by default (`PORT` / `HOST` in `.env`). No
+build step is needed — everything runs straight from TypeScript source via `tsx`. Without
+the Vite dev server you won't get its `/api` and `/uploads` proxy, so call the API at its
+own origin and set `CORS_ORIGINS` to match wherever your client is served from.
 
 ---
 
@@ -373,6 +442,8 @@ I also recommend turning *OFF* reasoning. Reasoning, in my experience with Gemma
 | ---------------- | --------------------------------------------------------------------------------- |
 | `pnpm install`   | Install all workspace dependencies.                                                |
 | `pnpm dev`       | Run the API server (tsx watch) **and** the web client (Vite) in parallel.         |
+| `pnpm --filter @dsim/server run dev` | Run **only** the API server (tsx watch), no frontend.                 |
+| `pnpm --filter @dsim/server run start` | Run **only** the API server once, without file watching.            |
 | `pnpm seed`      | Seed the database with a sample world, characters, shop items, properties & stocks.|
 | `pnpm mock`      | Build the isolated showcase world (separate `data/mock` save).                     |
 | `pnpm dev:mock`  | Run the app against the mock showcase world.                                       |

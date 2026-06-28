@@ -1,27 +1,17 @@
 import { useRef, useState } from 'react';
-import { useAppData } from '../../state/app-context';
+import { useTranslation } from 'react-i18next';
+import { useAppData, WALLPAPER_FITS, type WallpaperFit } from '../../state/app-context';
 import { errorMessage } from '../../lib/hooks';
-import { useT } from '../../i18n';
-import type { MessageKey } from '../../i18n/locales/en';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Banner, ConfirmDialog } from '../ui';
 import '../../pages/settings.page.css';
 
-const PRESETS: Array<{ nameKey: MessageKey; accent: string | null; accent2: string | null }> = [
-  { nameKey: 'pset.preset.rose', accent: null, accent2: null },
-  { nameKey: 'pset.preset.brass', accent: '#e6b15e', accent2: '#d98a3c' },
-  { nameKey: 'pset.preset.moonlight', accent: '#9db8de', accent2: '#6f8fd0' },
-  { nameKey: 'pset.preset.sage', accent: '#8fcf9f', accent2: '#4fa97e' },
-  { nameKey: 'pset.preset.ember', accent: '#e07a82', accent2: '#b23d52' },
-  { nameKey: 'pset.preset.plum', accent: '#b58bd6', accent2: '#e88aa6' },
-];
-
-const MAX_WALLPAPER_BYTES = 1.5 * 1024 * 1024;
+const MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
 
 export function SettingsApp() {
-  const t = useT();
-  const { theme, setTheme, creatorMode, setCreatorMode, resetProgress } = useAppData();
+  const { t } = useTranslation(['settings', 'common']);
+  const { theme, setTheme, setWallpaper, creatorMode, setCreatorMode, resetProgress } = useAppData();
   const [note, setNote] = useState<string>();
   const [error, setError] = useState<string>();
   const [resetting, setResetting] = useState(false);
@@ -31,19 +21,17 @@ export function SettingsApp() {
   const onWallpaper = (file: File) => {
     setError(undefined);
     if (file.size > MAX_WALLPAPER_BYTES) {
-      setError(t('pset.imageTooLarge'));
+      setError(t('toast.wallpaperTooLarge'));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        setTheme({ ...theme, wallpaper: String(reader.result) });
-        setNote(t('pset.wallpaperSet'));
-      } catch (e) {
-        setError(errorMessage(e));
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      // Hand the image Blob straight to the store — it's persisted in IndexedDB
+      // and surfaced as a short blob: URL (no megabyte data URL anywhere).
+      setWallpaper(file);
+      setNote(t('toast.wallpaperSet'));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
   };
 
   const totalReset = async () => {
@@ -52,7 +40,7 @@ export function SettingsApp() {
     setError(undefined);
     try {
       await resetProgress();
-      setNote(t('pset.resetDone'));
+      setNote(t('toast.progressReset'));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -62,17 +50,17 @@ export function SettingsApp() {
 
   return (
     <div className="phone-app">
-      <PhoneAppBar title={t('phone.app.settings')} icon="settings" />
+      <PhoneAppBar title={t('title')} icon="settings" />
       <div className="phone-embed">
         {note && <Banner kind="ok">{note}</Banner>}
         {error && <Banner kind="error">{error}</Banner>}
 
         {confirmReset && (
           <ConfirmDialog
-            kicker={t('pset.dangerZone')}
-            title={t('pset.totalReset')}
-            body={t('pset.resetBody')}
-            confirmLabel={t('pset.resetConfirm')}
+            kicker={t('reset.kicker')}
+            title={t('reset.title')}
+            body={t('reset.body')}
+            confirmLabel={t('reset.confirm')}
             danger
             busy={resetting}
             onConfirm={() => { void totalReset(); }}
@@ -82,45 +70,9 @@ export function SettingsApp() {
 
         <div className="pset-list">
           <div className="pset-group">
-            <div className="pset-group-head">{t('pset.accent')}</div>
+            <div className="pset-group-head">{t('wallpaper.head')}</div>
             <div className="pset-panel">
-              <div className="pset-swatches">
-                {PRESETS.map((p) => {
-                  const active = (theme.accent ?? null) === p.accent;
-                  return (
-                    <button
-                      key={p.nameKey}
-                      className={`pset-swatch ${active ? 'active' : ''}`}
-                      onClick={() => setTheme({ ...theme, accent: p.accent, accent2: p.accent2 })}
-                    >
-                      <span
-                        className="pset-gem"
-                        style={{
-                          background: p.accent
-                            ? `linear-gradient(135deg, ${p.accent}, ${p.accent2})`
-                            : 'linear-gradient(135deg, var(--rose), var(--brass))',
-                        }}
-                      />
-                      <span className="pset-swatch-name">{t(p.nameKey)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="pset-custom">
-                <span>{t('pset.customTint')}</span>
-                {/* <input type="color"> intentionally left as native — the color picker is a platform affordance */}
-                <input
-                  type="color"
-                  value={theme.accent ?? '#e88aa6'}
-                  onChange={(e) => setTheme({ ...theme, accent: e.target.value, accent2: e.target.value })}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="pset-group">
-            <div className="pset-group-head">{t('pset.wallpaper')}</div>
-            <div className="pset-panel">
+              <p className="pset-hint" style={{ marginBottom: 10 }}>{t('wallpaper.hint')}</p>
               <div className="pset-wall">
                 <span
                   className="pset-wall-prev"
@@ -130,7 +82,7 @@ export function SettingsApp() {
                 </span>
                 <div className="pset-wall-actions">
                   <label className="btn sm">
-                    <Icon name="upload" size={14} /> {t('pset.chooseImage')}
+                    <Icon name="upload" size={14} /> {t('common:chooseImage')}
                     <input
                       ref={fileRef}
                       type="file"
@@ -144,35 +96,53 @@ export function SettingsApp() {
                     />
                   </label>
                   {theme.wallpaper && (
-                    <button className="btn sm ghost" onClick={() => setTheme({ ...theme, wallpaper: null })}>
-                      {t('common.remove')}
+                    <button className="btn sm ghost" onClick={() => setWallpaper(null)}>
+                      {t('common:remove')}
                     </button>
                   )}
                 </div>
               </div>
+              {theme.wallpaper && (
+                <div className="pset-custom">
+                  <span>{t('wallpaper.scaling')}</span>
+                  <select
+                    aria-label={t('wallpaper.scaling')}
+                    value={theme.wallpaperFit}
+                    onChange={(e) => setTheme({ ...theme, wallpaperFit: e.target.value as WallpaperFit })}
+                  >
+                    {WALLPAPER_FITS.map((f) => (
+                      <option key={f} value={f}>{t(`wallpaper.fit.${f}`)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="pset-group">
-            <div className="pset-group-head">{t('settings.mode.title')}</div>
+            <div className="pset-group-head">{t('mode.head')}</div>
             <div className="pset-panel">
-              <p className="pset-hint" style={{ marginBottom: 10 }}>{t('pset.modeHint')}</p>
+              <p className="pset-hint" style={{ marginBottom: 10 }}>
+                {t('mode.hint')}
+              </p>
               <div className="row">
-                <button className={`btn sm ${!creatorMode ? 'primary' : ''}`} onClick={() => setCreatorMode(false)}>
-                  <Icon name="play" size={14} /> {t('settings.mode.playBtn')}
+                <button className={`btn sm ${!creatorMode ? 'primary' : ''}`} aria-pressed={!creatorMode} onClick={() => setCreatorMode(false)}>
+                  <Icon name="play" size={14} /> {t('mode.play')}
                 </button>
-                <button className={`btn sm ${creatorMode ? 'primary' : ''}`} onClick={() => setCreatorMode(true)}>
-                  <Icon name="settings" size={14} /> {t('settings.mode.creatorBtn')}
+                <button className={`btn sm ${creatorMode ? 'primary' : ''}`} aria-pressed={creatorMode} onClick={() => setCreatorMode(true)}>
+                  <Icon name="settings" size={14} /> {t('mode.creator')}
                 </button>
               </div>
             </div>
           </div>
 
           <div className="pset-danger">
-            <div className="pset-group-head">{t('pset.dangerZone')}</div>
-            <p className="pset-hint" style={{ margin: '8px 0 10px' }}>{t('pset.dangerHint')}</p>
+            <div className="pset-group-head">{t('danger.head')}</div>
+            <p className="pset-hint" style={{ margin: '8px 0 10px' }}>
+              {t('danger.hint')}
+            </p>
             <button className="btn sm danger" onClick={() => setConfirmReset(true)} disabled={resetting}>
-              <Icon name="trash" size={14} /> {resetting ? t('pset.resetting') : t('pset.totalResetBtn')}
+              <Icon name="trash" size={14} /> {resetting ? t('danger.resetting') : t('danger.reset')}
             </button>
           </div>
         </div>

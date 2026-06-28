@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resetDb, seedWorldAndCharacter } from '../test/helpers';
 import { setAdapterOverride } from '../llm/provider';
-import type { ChatAdapter, ChatRequest, ChatResult, ChatContentPart, ChatImagePart } from '../llm/types';
+import type { ChatAdapter, ChatRequest, ChatResult, ChatContentPart, ChatImagePart, LlmModelInfo } from '../llm/types';
 import { saveUploadedAsset, deleteAsset } from './asset-service';
-import { generateCharacterFromImage } from './character-service';
+import { generateCharacterFromImage, generateCharacterFromSources } from './character-service';
 
 /**
  * Records EVERY request. Character-from-image is now TWO calls:
@@ -25,7 +25,7 @@ class RecordingAdapter implements ChatAdapter {
     onDelta(r.content);
     return r;
   }
-  async listModels(): Promise<string[]> {
+  async listModels(): Promise<LlmModelInfo[]> {
     return [];
   }
 }
@@ -164,6 +164,49 @@ describe('character generation from a portrait (two-stage vision)', () => {
     const adapter = new RecordingAdapter([DESCRIPTION, JSON.stringify(TEMPLATE)]);
     setAdapterOverride(adapter);
     await expect(generateCharacterFromImage({ assetId: 'does-not-exist', worldId: null })).rejects.toThrow();
+    expect(adapter.requests.length).toBe(0);
+  });
+});
+
+const SOURCE_TEXT = 'Aunt Mira runs the night market herbalist stall; sharp-tongued, secretly soft, allergic to cats.';
+
+describe('character generation from sources (portrait and/or text)', () => {
+  it('text-only: skips the vision stage and feeds the source text into the build', async () => {
+    const adapter = new RecordingAdapter([JSON.stringify(TEMPLATE)]);
+    setAdapterOverride(adapter);
+
+    const res = await generateCharacterFromSources({ assetId: null, sourceText: SOURCE_TEXT, worldId: null });
+    expect(res.ok).toBe(true);
+    // Only ONE call (the build) — no portrait means no vision stage.
+    expect(adapter.requests.length).toBe(1);
+    // The build is text-only and carries the source text.
+    const hasImage = adapter.requests[0]!.messages.some((m) => Array.isArray(m.content));
+    expect(hasImage).toBe(false);
+    const buildText = adapter.requests[0]!.messages
+      .map((m) => (typeof m.content === 'string' ? m.content : ''))
+      .join('\n');
+    expect(buildText).toContain(SOURCE_TEXT);
+  });
+
+  it('portrait + text: runs the vision stage and feeds BOTH into the build', async () => {
+    const adapter = new RecordingAdapter([DESCRIPTION, JSON.stringify(TEMPLATE)]);
+    setAdapterOverride(adapter);
+    const assetId = makePortrait();
+
+    const res = await generateCharacterFromSources({ assetId, sourceText: SOURCE_TEXT, worldId: null });
+    expect(res.ok).toBe(true);
+    expect(adapter.requests.length).toBe(2);
+    const buildText = adapter.requests[1]!.messages
+      .map((m) => (typeof m.content === 'string' ? m.content : ''))
+      .join('\n');
+    expect(buildText).toContain(DESCRIPTION);
+    expect(buildText).toContain(SOURCE_TEXT);
+  });
+
+  it('rejects when neither a portrait nor any text is provided (no model call)', async () => {
+    const adapter = new RecordingAdapter([JSON.stringify(TEMPLATE)]);
+    setAdapterOverride(adapter);
+    await expect(generateCharacterFromSources({ assetId: null, sourceText: '   ', worldId: null })).rejects.toThrow();
     expect(adapter.requests.length).toBe(0);
   });
 });

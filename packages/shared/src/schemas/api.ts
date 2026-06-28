@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GEN_TEXT } from '../constants';
 import { DatingStatsSchema, DEFAULT_DATING_STATS } from '../stats';
 import { IntentSchema } from '../intent';
 import { RelationshipDeltaSchema } from './llm';
@@ -43,9 +44,9 @@ import {
   MarketNewsSchema,
   GamblingRoundSchema,
 } from './entities';
-import { DayRecapSchema, ITEM_GEN, LOCATION_GEN, PROPERTY_GEN, STOCK_GEN } from './llm';
+import { DayRecapSchema, ITEM_GEN, LOCATION_GEN, PROPERTY_GEN, STOCK_GEN, WORLD_GEN } from './llm';
 import { ItemCategorySchema, ItemRaritySchema } from './items';
-import { RelationshipStatusSchema } from '../social';
+import { CharacterLinkKindSchema, RelationshipStatusSchema } from '../social';
 import { PropertyCategorySchema, StockSectorSchema } from '../wealth';
 import { CardSchema, CasinoGameSchema, RouletteBetSchema, VideoPokerRankSchema, SlotSymbolSchema } from '../gambling';
 import {
@@ -63,30 +64,6 @@ import {
  * stat deltas) are deliberately omitted from input shapes.
  */
 
-// --- World ------------------------------------------------------------------
-
-export const WorldCreateSchema = WorldSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type WorldCreate = z.input<typeof WorldCreateSchema>;
-
-export const WorldUpdateSchema = WorldCreateSchema.partial();
-export type WorldUpdate = z.input<typeof WorldUpdateSchema>;
-
-/** Clone an existing world (definition + notes + cast) into a fresh save. */
-export const CloneWorldSchema = z.object({
-  name: z.string().min(1).max(120),
-});
-export type CloneWorld = z.input<typeof CloneWorldSchema>;
-
-/** Copy character DEFINITIONS from other worlds into this one as fresh characters. */
-export const ImportCharactersSchema = z.object({
-  sourceCharacterIds: z.array(z.string().min(1)).min(1).max(50),
-});
-export type ImportCharacters = z.input<typeof ImportCharactersSchema>;
-
 // --- World notes ------------------------------------------------------------
 
 export const WorldNoteCreateSchema = WorldNoteSchema.omit({
@@ -99,6 +76,36 @@ export type WorldNoteCreate = z.input<typeof WorldNoteCreateSchema>;
 
 export const WorldNoteUpdateSchema = WorldNoteCreateSchema.partial();
 export type WorldNoteUpdate = z.input<typeof WorldNoteUpdateSchema>;
+
+// --- World ------------------------------------------------------------------
+
+const WorldBaseSchema = WorldSchema.omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const WorldCreateSchema = WorldBaseSchema.extend({
+  // Optional structured notes to persist alongside the world in one shot (used by
+  // the onboarding world generator). Create-only — not part of WorldUpdate.
+  notes: z.array(WorldNoteCreateSchema).max(WORLD_GEN.MAX_NOTES).optional(),
+});
+export type WorldCreate = z.input<typeof WorldCreateSchema>;
+
+export const WorldUpdateSchema = WorldBaseSchema.partial();
+export type WorldUpdate = z.input<typeof WorldUpdateSchema>;
+
+/** Clone an existing world (definition + notes + cast) into a fresh save. */
+export const CloneWorldSchema = z.object({
+  name: z.string().min(1).max(GEN_TEXT.label),
+});
+export type CloneWorld = z.input<typeof CloneWorldSchema>;
+
+/** Copy character DEFINITIONS from other worlds into this one as fresh characters. */
+export const ImportCharactersSchema = z.object({
+  sourceCharacterIds: z.array(z.string().min(1)).min(1).max(50),
+});
+export type ImportCharacters = z.input<typeof ImportCharactersSchema>;
 
 // --- Character --------------------------------------------------------------
 
@@ -160,6 +167,26 @@ export const GenerateCharacterFromImageInputSchema = z.object({
   worldId: z.string().min(1).nullable().default(null),
 });
 export type GenerateCharacterFromImageInput = z.input<typeof GenerateCharacterFromImageInputSchema>;
+
+/**
+ * Input for the unified character generator (creator tool). Builds a full draft
+ * from ANY combination of a portrait and/or free-text reference (pasted text or an
+ * uploaded text file's contents — a wiki article, a character sheet, a few notes).
+ * At least one source is required. The text is reference DATA only — it is never
+ * executed and never treated as instructions. The server owns the bounded output;
+ * nothing is persisted until the creator saves the draft.
+ */
+export const GenerateCharacterFromSourcesInputSchema = z
+  .object({
+    assetId: z.string().min(1).nullable().default(null),
+    // Bounded so a giant paste/file can't blow up the prompt; the client trims too.
+    sourceText: z.string().max(40000).default(''),
+    worldId: z.string().min(1).nullable().default(null),
+  })
+  .refine((d) => Boolean(d.assetId) || d.sourceText.trim().length > 0, {
+    message: 'Provide a portrait, some reference text, or both.',
+  });
+export type GenerateCharacterFromSourcesInput = z.input<typeof GenerateCharacterFromSourcesInputSchema>;
 
 // --- Character memory (manual creation) -------------------------------------
 
@@ -259,18 +286,18 @@ export type ShopItemUpdate = z.input<typeof ShopItemUpdateSchema>;
  */
 export const GenerateShopItemsInputSchema = z.object({
   count: z.number().int().min(1).max(ITEM_GEN.MAX_ITEMS).default(4),
-  theme: z.string().max(400).default(''),
+  theme: z.string().max(GEN_TEXT.line).default(''),
   rarityHint: ItemRaritySchema.optional(),
   categoryHint: ItemCategorySchema.optional(),
   minPrice: z.number().int().min(ITEM_GEN.MIN_PRICE).max(ITEM_GEN.MAX_PRICE).optional(),
   maxPrice: z.number().int().min(ITEM_GEN.MIN_PRICE).max(ITEM_GEN.MAX_PRICE).optional(),
   world: z
     .object({
-      name: z.string().max(120).default(''),
-      summary: z.string().max(1_000).default(''),
-      tone: z.string().max(400).default(''),
-      lore: z.string().max(2_000).default(''),
-      rules: z.string().max(2_000).default(''),
+      name: z.string().max(GEN_TEXT.label).default(''),
+      summary: z.string().max(GEN_TEXT.blurb).default(''),
+      tone: z.string().max(GEN_TEXT.line).default(''),
+      lore: z.string().max(GEN_TEXT.prose).default(''),
+      rules: z.string().max(GEN_TEXT.prose).default(''),
     })
     .default({}),
 });
@@ -286,11 +313,52 @@ export type GenerateShopItemsParsed = z.output<typeof GenerateShopItemsInputSche
  */
 export const GenerateLocationsInputSchema = z.object({
   count: z.number().int().min(1).max(LOCATION_GEN.MAX_LOCATIONS).default(4),
-  prompt: z.string().max(600).default(''),
+  prompt: z.string().max(GEN_TEXT.prose).default(''),
 });
 export type GenerateLocationsInput = z.input<typeof GenerateLocationsInputSchema>;
 /** Parsed form (defaults applied) used by the server prompt builder + bounding. */
 export type GenerateLocationsParsed = z.output<typeof GenerateLocationsInputSchema>;
+
+/**
+ * Input for the LLM whole-world generator (onboarding tool). The creator supplies a
+ * few optional seeds (name/summary/tone) plus a free-form `prompt` idea; the server
+ * fleshes out the setting + a batch of locations. No world need exist yet, so unlike
+ * location generation this carries its own seed context rather than loading a world.
+ */
+export const GenerateWorldInputSchema = z.object({
+  name: z.string().max(WORLD_GEN.MAX_NAME).default(''),
+  summary: z.string().max(GEN_TEXT.blurb).default(''),
+  tone: z.string().max(GEN_TEXT.line).default(''),
+  prompt: z.string().max(GEN_TEXT.prose).default(''),
+  locationCount: z
+    .number()
+    .int()
+    .min(WORLD_GEN.MIN_LOCATIONS)
+    .max(WORLD_GEN.MAX_LOCATIONS)
+    .default(5),
+  noteCount: z.number().int().min(WORLD_GEN.MIN_NOTES).max(WORLD_GEN.MAX_NOTES).default(4),
+});
+export type GenerateWorldInput = z.input<typeof GenerateWorldInputSchema>;
+export type GenerateWorldParsed = z.output<typeof GenerateWorldInputSchema>;
+
+/**
+ * The server-bounded world DRAFT returned to the client: the full setting
+ * (summary/tone/lore/rules/globalNotes) + locations + structured world notes, no
+ * cast. `notes` are ready-to-create WorldNoteCreate rows (the world doesn't exist
+ * yet, so they're persisted right after it's created).
+ */
+export const WorldGenDraftSchema = WorldSchema.pick({
+  name: true,
+  summary: true,
+  tone: true,
+  lore: true,
+  rules: true,
+  globalNotes: true,
+  locations: true,
+}).extend({
+  notes: z.array(WorldNoteCreateSchema),
+});
+export type WorldGenDraft = z.infer<typeof WorldGenDraftSchema>;
 
 export const PurchaseSchema = z.object({
   shopItemId: z.string().min(1),
@@ -342,7 +410,7 @@ export type PropertyUpdate = z.input<typeof PropertyUpdateSchema>;
 /** Input for the LLM property generator (creator tool). `world` is reference DATA. */
 export const GeneratePropertiesInputSchema = z.object({
   count: z.number().int().min(1).max(PROPERTY_GEN.MAX_PROPERTIES).default(4),
-  theme: z.string().max(400).default(''),
+  theme: z.string().max(GEN_TEXT.line).default(''),
   categoryHint: PropertyCategorySchema.optional(),
   world: WorldRefSchema,
 });
@@ -405,7 +473,7 @@ export type CompanyUpdate = z.input<typeof CompanyUpdateSchema>;
 /** Input for the LLM company generator (creator tool). `world` is reference DATA. */
 export const GenerateCompaniesInputSchema = z.object({
   count: z.number().int().min(1).max(STOCK_GEN.MAX_COMPANIES).default(4),
-  theme: z.string().max(400).default(''),
+  theme: z.string().max(GEN_TEXT.line).default(''),
   sectorHint: StockSectorSchema.optional(),
   world: WorldRefSchema,
 });
@@ -803,6 +871,104 @@ export const CharacterBundleSchema = z.object({
 });
 export type CharacterBundle = z.infer<typeof CharacterBundleSchema>;
 
+// --- Social dossier (the phone "Social" app's tap-to-open person sheet) ------
+
+/** One of a person's ties to another character, resolved for the dossier sheet. */
+export const DossierTieSchema = z.object({
+  targetId: z.string(),
+  name: z.string(),
+  portraitAssetId: z.string().nullable().default(null),
+  kind: CharacterLinkKindSchema,
+  /** The world-sim formed this tie during play (vs. a hand-authored one). */
+  derived: z.boolean().default(false),
+  /** Only the OTHER person declared this tie (a one-sided rivalry, surfaced here). */
+  incoming: z.boolean().default(false),
+});
+export type DossierTie = z.infer<typeof DossierTieSchema>;
+
+/** One remembered moment in a person's timeline (their off-screen life + your history). */
+export const DossierTimelineEntrySchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  /** 'life' = their own off-screen social life (a world-sim run-in); 'memory' = a
+   *  remembered moment, usually with the player. */
+  kind: z.enum(['life', 'memory']).default('memory'),
+  /** The other character a 'life' moment involves, resolved to a name (if any). */
+  withName: z.string().nullable().default(null),
+  importance: z.number().int().min(1).max(5).default(1),
+  createdAt: z.number().int().nonnegative(),
+});
+export type DossierTimelineEntry = z.infer<typeof DossierTimelineEntrySchema>;
+
+/** A bit of word about the PLAYER that has reached this person secondhand. */
+export const DossierHeardEntrySchema = z.object({
+  claim: z.string(),
+  /** 0–100 — how intact the rumor still is (lower = more garbled). */
+  fidelity: z.number().int().min(0).max(100).default(0),
+  /** Who they (most recently) heard it from. */
+  fromName: z.string().nullable().default(null),
+});
+export type DossierHeardEntry = z.infer<typeof DossierHeardEntrySchema>;
+
+/** The player's standing with a person, summarized for the dossier header. */
+export const DossierStandingSchema = z.object({
+  /** A WarmthBandKey (near-strangers … sweethearts). */
+  warmthBand: z.string().default('near-strangers'),
+  status: RelationshipStatusSchema.default('none'),
+  /** Humanized earned story flags ("Met their parents", "Said I love you", …). */
+  flags: z.array(z.string()).default([]),
+});
+export type DossierStanding = z.infer<typeof DossierStandingSchema>;
+
+/**
+ * The read-model behind the Social app's tap-to-open person sheet: who someone is,
+ * where the player stands with them, their place in the web, their remembered recent
+ * life, and what's reached them about the player through the grapevine. A PURE
+ * projection over existing repos — composed at read time, never mutates or mints events.
+ */
+export const CharacterDossierSchema = z.object({
+  characterId: z.string(),
+  name: z.string(),
+  portraitAssetId: z.string().nullable().default(null),
+  shortDescription: z.string().default(''),
+  /** Has the player actually met them, or do they only know OF them through the web? */
+  hasMet: z.boolean().default(false),
+  /** The player's standing with them (null until they've met). */
+  standing: DossierStandingSchema.nullable().default(null),
+  /** How this person relates to others in the world's social web. */
+  ties: z.array(DossierTieSchema).default([]),
+  /** Their remembered recent life + your shared history, newest first. */
+  timeline: z.array(DossierTimelineEntrySchema).default([]),
+  /** Word about the player that has filtered through to them secondhand (the grapevine). */
+  heardAboutYou: z.array(DossierHeardEntrySchema).default([]),
+});
+export type CharacterDossier = z.infer<typeof CharacterDossierSchema>;
+
+// --- Constellation (the relationship map: the player hearth + the town's web) -
+
+/** The player's tie to one character — a hearth-thread in the constellation. */
+export const ConstellationEdgeSchema = z.object({
+  characterId: z.string(),
+  /** 0..100 player↔character warmth — drives the thread's brightness + thickness. */
+  warmth: z.number().int().min(0).max(100).default(0),
+  /** The warmth band (near-strangers … sweethearts) — colors the thread + node glow. */
+  band: z.string().default('near-strangers'),
+  status: RelationshipStatusSchema.default('none'),
+});
+export type ConstellationEdge = z.infer<typeof ConstellationEdgeSchema>;
+
+/**
+ * The player-centric layer of the relationship map: the player's name (the hearth at
+ * the center) and a warmth-weighted thread to every character they've actually met.
+ * The NPC↔NPC web is fetched separately (getSocialWeb); the client weaves the two
+ * layers into one breathing constellation.
+ */
+export const ConstellationViewSchema = z.object({
+  playerName: z.string().default(''),
+  edges: z.array(ConstellationEdgeSchema).default([]),
+});
+export type ConstellationView = z.infer<typeof ConstellationViewSchema>;
+
 // --- World clock (time / stamina / day) -------------------------------------
 
 export const NeglectedCharacterSchema = z.object({
@@ -814,7 +980,7 @@ export type NeglectedCharacter = z.infer<typeof NeglectedCharacterSchema>;
 
 // What the NPC world did on a given day — surfaced in the end-of-day recap modal.
 export const WorldSimBeatSchema = z.object({
-  kind: z.enum(['met', 'worked', 'shared', 'linked']),
+  kind: z.enum(['met', 'worked', 'shared', 'linked', 'soured']),
   summary: z.string(),
 });
 export type WorldSimBeat = z.infer<typeof WorldSimBeatSchema>;
@@ -895,6 +1061,9 @@ export const PhoneThreadSummarySchema = z.object({
   portraitAssetId: z.string().nullable(),
   lastBody: z.string().nullable(),
   lastAt: z.number().nullable(),
+  /** Whether the last delivered text was sent by the player — lets the inbox
+   *  preview prefix "You:" so an outgoing-but-unanswered thread reads clearly. */
+  lastFromPlayer: z.boolean().default(false),
   unread: z.number().int().nonnegative(),
   /** Current-day availability, so the inbox can flag a busy contact up front
    *  (without the player having to attempt a text to find out). */
@@ -916,7 +1085,7 @@ export type PhoneInbox = z.infer<typeof PhoneInboxSchema>;
 // --- Faces (social feed) ----------------------------------------------------
 
 export const CreateFeedPostSchema = z.object({
-  body: z.string().min(1).max(500),
+  body: z.string().min(1).max(GEN_TEXT.line),
   worldId: z.string().min(1),
 });
 export type CreateFeedPost = z.input<typeof CreateFeedPostSchema>;
@@ -927,7 +1096,7 @@ export const FeedReactSchema = z.object({
 export type FeedReact = z.input<typeof FeedReactSchema>;
 
 export const FeedCommentInputSchema = z.object({
-  body: z.string().min(1).max(400),
+  body: z.string().min(1).max(GEN_TEXT.line),
 });
 export type FeedCommentInput = z.input<typeof FeedCommentInputSchema>;
 

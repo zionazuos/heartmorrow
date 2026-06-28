@@ -6,17 +6,34 @@ import {
   GenerateDatingStatsInputSchema,
   GenerateProfileInputSchema,
   GenerateCharacterFromImageInputSchema,
+  GenerateCharacterFromSourcesInputSchema,
   ProfileGenerationSchema,
   RoomDescriptionSchema,
   DATING_STAT_KEYS,
   MIN_CHARACTER_AGE,
+  CHARACTER_LINK_ORDER,
   clampStat,
+  currentStatus,
+  humanizeStoryFlag,
+  isBrokenUp,
+  isInternalFlagKey,
+  reciprocalLinkKind,
+  resolveLlmRole,
+  warmthBand,
+  warmthOf,
+  GEN_TEXT,
   type Character,
   type CharacterBundle,
   type CharacterCreate,
+  type CharacterDossier,
   type CharacterLink,
   type CharacterLinkKind,
   type CharacterUpdate,
+  type ConstellationEdge,
+  type ConstellationView,
+  type DossierHeardEntry,
+  type DossierTie,
+  type DossierTimelineEntry,
   type SocialTie,
   type SocialWeb,
   type CharacterTemplateGeneration,
@@ -25,14 +42,16 @@ import {
   type GenerateDatingStatsInput,
   type GenerateProfileInput,
   type GenerateCharacterFromImageInput,
+  type GenerateCharacterFromSourcesInput,
   type ProfileGeneration,
   type StructuredResult,
 } from '@dsim/shared';
-import { charactersRepo, npcEdgesRepo, worldsRepo } from '../db/repositories';
-import { newId } from '../lib/ids';
+import { charactersRepo, npcEdgesRepo, npcKnowledgeRepo, worldsRepo } from '../db/repositories';
+import { newId, playerIdForWorldOrDefault } from '../lib/ids';
 import { notFound } from '../lib/errors';
-import { ensureRelationship } from './relationship-service';
-import { listMemories } from './memory-service';
+import { ensureRelationship, getRelationship } from './relationship-service';
+import { getOrCreatePlayer } from './player-service';
+import { listMemories, NPC_LIFE_TAG } from './memory-service';
 import { getLlmSettings } from './settings-service';
 import { readAssetFile } from './asset-service';
 import { callStructuredLlm } from '../llm/structured';
@@ -41,9 +60,9 @@ import { stripThink } from '../lib/think-filter';
 import {
   buildRoomMessages,
   buildImageDescriptionMessages,
-  buildCharacterFromDescriptionMessages,
+  buildCharacterFromSourcesMessages,
 } from '../prompt/prompt-builder';
-import { PROFILE_GEN_GUARDRAILS } from '../prompt/guardrails';
+import { resolvePrompt } from '../prompt/registry';
 import type { ChatMessage } from '../llm/types';
 
 export function listCharacters(worldId?: string): Character[] {
@@ -108,6 +127,28 @@ export function listAcquaintances(character: Character): Array<{ name: string; k
 }
 
 /**
+ * The NPC(s) this character has actually paired off with via an emergent world-sim
+ * romance (an `npc_edges` row at `romanceState === 'together'`). The world ANNOUNCES
+ * these couples (recap beat + Social app), but the pairing only lives in npc_edges —
+ * the character's own date/text prompt is otherwise blind to it, which is why a
+ * coupled-off character would flatly deny being taken when asked. Feeding this into
+ * the prompts lets them be honest instead. Empty for the unattached / world-less.
+ * (Authored "partner" links are a separate, pre-existing concern and not included.)
+ */
+export function currentNpcPartners(character: Character): Character[] {
+  if (!character.worldId) return [];
+  const partners: Character[] = [];
+  for (const e of npcEdgesRepo.listByWorld(character.worldId)) {
+    if (e.romanceState !== 'together') continue;
+    const otherId = e.aId === character.id ? e.bId : e.bId === character.id ? e.aId : null;
+    if (!otherId) continue;
+    const other = charactersRepo.get(otherId);
+    if (other) partners.push(other);
+  }
+  return partners;
+}
+
+/**
  * The whole world's social web for the phone "Social" view: every character's
  * ties, merging AUTHORED links with the WORLD-SIM's derived `npc_edges`
  * (run-in acquaintances + friendships grown from repeated meetings). The
@@ -141,11 +182,32 @@ export function getSocialWeb(worldId?: string): SocialWeb {
   if (worldId) {
     for (const e of npcEdgesRepo.listByWorld(worldId)) {
       if (e.aId === e.bId) continue;
-      const kind: CharacterLinkKind = e.promoted ? 'friend' : 'acquaintance';
+      // A world-sim-grown couple reads as partners; a fallen-out pair as rivals; a
+      // sustained friendship as friends; a mere run-in as an acquaintance.
+      const kind: CharacterLinkKind =
+        e.romanceState === 'together'
+          ? 'partner'
+          : e.soured
+            ? 'rival'
+            : e.promoted
+              ? 'friend'
+              : 'acquaintance';
+      // A 'partner' (a world-sim couple) UPGRADES an existing non-partner tie — couples
+      // usually grow out of an authored friend/coworker bond, so a stale "Friend" chip
+      // must not hide the new relationship. friend/acquaintance only fill GAPS, so an
+      // authored own link still wins. (An authored `partner` pair can never reach
+      // 'together' — they're already in coupledIds — so a real partner is never clobbered.)
+      const place = (m: Map<string, SocialTie>, target: string) => {
+        const existing = m.get(target);
+        if (!existing) m.set(target, { targetId: target, kind, derived: true });
+        else if (kind === 'partner' && existing.kind !== 'partner') {
+          m.set(target, { targetId: target, kind: 'partner', derived: true });
+        }
+      };
       const a = ties.get(e.aId);
       const b = ties.get(e.bId);
-      if (a && known.has(e.bId) && !a.has(e.bId)) a.set(e.bId, { targetId: e.bId, kind, derived: true });
-      if (b && known.has(e.aId) && !b.has(e.aId)) b.set(e.aId, { targetId: e.aId, kind, derived: true });
+      if (a && known.has(e.bId)) place(a, e.bId);
+      if (b && known.has(e.aId)) place(b, e.aId);
     }
   }
   // 3) Incoming authored ties (lowest precedence): if O authored a tie to C and C
@@ -168,6 +230,128 @@ export function getSocialWeb(worldId?: string): SocialWeb {
   return { nodes };
 }
 
+/** Newest-first timeline entries to compose, and grapevine items to surface. */
+const DOSSIER_TIMELINE_MAX = 30;
+const DOSSIER_HEARD_MAX = 3;
+
+/**
+ * Compose a character's "dossier" — the read-model behind the Social app's
+ * tap-to-open person sheet: who they are, where the player stands with them, their
+ * place in the social web, their remembered recent life, and what's reached them
+ * about the player through the grapevine. A PURE projection over existing repos; it
+ * never mints events (the only write is the lazy relationship-ensure that the
+ * `/relationship` route already performs on read). 404s if the character is gone.
+ */
+export function composeDossier(characterId: string): CharacterDossier {
+  const character = getCharacter(characterId);
+  const worldId = character.worldId;
+  const playerId = playerIdForWorldOrDefault(worldId);
+  const rel = getRelationship(characterId, playerId);
+
+  // Earned, player-facing story flags (drop internal bookkeeping keys).
+  const flags = Object.entries(rel.flags)
+    .filter(([k]) => !isInternalFlagKey(k))
+    .map(([k, v]) => humanizeStoryFlag(k, v))
+    .filter((s): s is string => s != null);
+
+  // "Met" = a real signal the player has interacted with them: a date/text stamps
+  // lastSeenDay, or there's a commitment / earned flag / past breakup. NOT warmth —
+  // default stats give every relationship a baseline warmth, so it can't tell a
+  // stranger from an acquaintance. (Avoids importing hasDated: text-message-service →
+  // character-service would cycle.)
+  const hasMet =
+    rel.flags['lastSeenDay'] != null || currentStatus(rel) !== 'none' || isBrokenUp(rel) || flags.length > 0;
+  const standing = hasMet ? { warmthBand: warmthBand(rel), status: currentStatus(rel), flags } : null;
+
+  // Their place in the web (this node's ties), strongest bonds first then by name.
+  const node = getSocialWeb(worldId ?? undefined).nodes.find((n) => n.id === characterId);
+  const ties: DossierTie[] = (node?.ties ?? [])
+    .map((t): DossierTie | null => {
+      const peer = charactersRepo.get(t.targetId);
+      if (!peer) return null;
+      return {
+        targetId: t.targetId,
+        name: peer.name,
+        portraitAssetId: peer.portraitAssetId,
+        kind: t.kind,
+        derived: t.derived,
+        incoming: t.incoming ?? false,
+      };
+    })
+    .filter((t): t is DossierTie => t != null)
+    .sort(
+      (a, b) =>
+        CHARACTER_LINK_ORDER.indexOf(a.kind) - CHARACTER_LINK_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name),
+    );
+
+  // Their remembered recent life + your shared history (memories come created_at DESC).
+  const timeline: DossierTimelineEntry[] = listMemories(characterId)
+    .slice(0, DOSSIER_TIMELINE_MAX)
+    .map((m): DossierTimelineEntry => {
+      const isLife = m.tags.includes(NPC_LIFE_TAG);
+      const peer = m.relatedCharacterId ? charactersRepo.get(m.relatedCharacterId) : null;
+      return {
+        id: m.id,
+        text: m.text,
+        kind: isLife ? 'life' : 'memory',
+        withName: peer && peer.id !== playerId ? peer.name : null,
+        importance: Math.max(1, Math.min(5, m.importance)),
+        createdAt: m.createdAt,
+      };
+    });
+
+  // Word about the player that reached them SECONDHAND (the grapevine), top by fidelity.
+  const heardAboutYou: DossierHeardEntry[] = npcKnowledgeRepo
+    .listByKnower(characterId)
+    .filter((k) => k.subjectId === playerId && k.sourceKnowerId != null && k.fidelity > 0)
+    .sort((a, b) => b.fidelity - a.fidelity)
+    .slice(0, DOSSIER_HEARD_MAX)
+    .map((k) => ({
+      claim: k.claim,
+      fidelity: k.fidelity,
+      fromName: k.sourceKnowerId ? charactersRepo.get(k.sourceKnowerId)?.name ?? null : null,
+    }));
+
+  return {
+    characterId,
+    name: character.name,
+    portraitAssetId: character.portraitAssetId,
+    shortDescription: character.shortDescription ?? '',
+    hasMet,
+    standing,
+    ties,
+    timeline,
+    heardAboutYou,
+  };
+}
+
+/**
+ * The player-centric layer of the constellation map: the player's display name (the
+ * hearth) and a warmth-weighted thread to every character they've actually met. A PURE
+ * read over relationships (the NPC↔NPC web rides getSocialWeb). "Met" mirrors
+ * composeDossier — any real signal the player has interacted with them.
+ */
+export function composeConstellation(worldId?: string): ConstellationView {
+  const playerName = getOrCreatePlayer(playerIdForWorldOrDefault(worldId ?? undefined)).name;
+  const edges: ConstellationEdge[] = [];
+  for (const c of listCharacters(worldId)) {
+    const rel = getRelationship(c.id);
+    const hasEarnedFlag = Object.entries(rel.flags).some(([k, v]) => !isInternalFlagKey(k) && humanizeStoryFlag(k, v) != null);
+    // "Met" = a real interaction. A date/text stamps lastSeenDay; a commitment, a
+    // breakup, or an earned story flag also counts. Default stats give EVERY relationship
+    // a small baseline warmth, so warmth alone can't tell a stranger from someone you know.
+    const met = rel.flags['lastSeenDay'] != null || currentStatus(rel) !== 'none' || isBrokenUp(rel) || hasEarnedFlag;
+    if (!met) continue;
+    edges.push({
+      characterId: c.id,
+      warmth: Math.round(Math.max(0, Math.min(100, warmthOf(rel)))),
+      band: warmthBand(rel),
+      status: currentStatus(rel),
+    });
+  }
+  return { playerName, edges };
+}
+
 /**
  * Mirror one authored connection onto the target so a non-rival connection is
  * mutual. Same-world only (connections never cross worlds), and we overwrite any
@@ -176,7 +360,10 @@ export function getSocialWeb(worldId?: string): SocialWeb {
 function setReciprocalLink(source: Character, targetId: string, kind: CharacterLinkKind): void {
   const target = charactersRepo.get(targetId);
   if (!target || target.worldId !== source.worldId) return;
-  const links = [...target.links.filter((l) => l.targetId !== source.id), { targetId: source.id, kind }];
+  // The back-link carries the INVERSE kind for asymmetric bonds (mentor ↔ mentee),
+  // so the two sides don't both end up calling each other "mentor".
+  const backKind = reciprocalLinkKind(kind);
+  const links = [...target.links.filter((l) => l.targetId !== source.id), { targetId: source.id, kind: backKind }];
   charactersRepo.update(CharacterSchema.parse({ ...target, links, updatedAt: Date.now() }));
 }
 
@@ -189,7 +376,8 @@ function removeReciprocalLink(source: Character, targetId: string, kind: Charact
   const target = charactersRepo.get(targetId);
   if (!target || target.worldId !== source.worldId) return;
   const existing = target.links.find((l) => l.targetId === source.id);
-  if (!existing || existing.kind !== kind) return;
+  // Only drop the mirror if it still matches what we'd have written (the inverse kind).
+  if (!existing || existing.kind !== reciprocalLinkKind(kind)) return;
   const links = target.links.filter((l) => l.targetId !== source.id);
   charactersRepo.update(CharacterSchema.parse({ ...target, links, updatedAt: Date.now() }));
 }
@@ -363,7 +551,7 @@ export async function generateCharacterProfile(
   const data = GenerateProfileInputSchema.parse(input);
   const settings = getLlmSettings();
   const messages: ChatMessage[] = [
-    { role: 'system', content: PROFILE_GEN_GUARDRAILS },
+    { role: 'system', content: resolvePrompt('PROFILE_GEN_GUARDRAILS') },
     {
       role: 'user',
       content:
@@ -407,7 +595,7 @@ function boundText(s: string, max: number): string {
 }
 
 /** Clamp a list of short phrases: trim, drop empties, cap item length (word-boundary) + count. */
-function boundList(items: string[], maxItems = 10, maxLen = 80): string[] {
+function boundList(items: string[], maxItems = 10, maxLen: number = GEN_TEXT.label): string[] {
   return items
     .map((s) => trimToWord(s, maxLen))
     .filter((s) => s.length > 0)
@@ -426,24 +614,24 @@ function boundGeneratedTemplate(g: CharacterTemplateGeneration): CharacterTempla
     Object.fromEntries(DATING_STAT_KEYS.map((k) => [k, clampStat(g.datingStats[k])])),
   );
   return {
-    name: boundText(g.name, 80),
+    name: boundText(g.name, GEN_TEXT.label),
     age: Math.max(MIN_CHARACTER_AGE, Math.round(g.age)),
-    pronouns: boundText(g.pronouns, 40) || 'they/them',
+    pronouns: boundText(g.pronouns, GEN_TEXT.label) || 'they/them',
     gender: g.gender,
     sexuality: g.sexuality,
-    shortDescription: boundText(g.shortDescription, 600),
-    personality: boundText(g.personality, 1500),
-    speechStyle: boundText(g.speechStyle, 600),
-    relationshipPreferences: boundText(g.relationshipPreferences, 600),
+    shortDescription: boundText(g.shortDescription, GEN_TEXT.line),
+    personality: boundText(g.personality, GEN_TEXT.prose),
+    speechStyle: boundText(g.speechStyle, GEN_TEXT.prose),
+    relationshipPreferences: boundText(g.relationshipPreferences, GEN_TEXT.prose),
     relationshipStyle: g.relationshipStyle,
     likes: boundList(g.likes),
     dislikes: boundList(g.dislikes),
     goals: boundList(g.goals),
     boundaries: boundList(g.boundaries),
-    appearance: boundText(g.appearance, 600),
-    textingStyle: boundText(g.textingStyle, 240),
-    onlinePersona: boundText(g.onlinePersona, 240),
-    loveLanguage: boundText(g.loveLanguage, 120),
+    appearance: boundText(g.appearance, GEN_TEXT.prose),
+    textingStyle: boundText(g.textingStyle, GEN_TEXT.prose),
+    onlinePersona: boundText(g.onlinePersona, GEN_TEXT.prose),
+    loveLanguage: boundText(g.loveLanguage, GEN_TEXT.line),
     physicalNeeds: boundList(g.physicalNeeds, 8),
     physicalDesires: boundList(g.physicalDesires, 8),
     physicalDislikes: boundList(g.physicalDislikes, 8),
@@ -455,22 +643,25 @@ function boundGeneratedTemplate(g: CharacterTemplateGeneration): CharacterTempla
 }
 
 /**
- * Design a complete character DRAFT from an uploaded portrait, flavored by the
- * (optional) world. TWO-STAGE so each model does what it's good at:
- *  1) a VISION model writes a short, free-text physical description of the image
- *     (cheap + fast — no schema/grammar to slow it down);
- *  2) the smarter MAIN model builds the full structured character from that text.
+ * Design a complete character DRAFT from ANY combination of an uploaded portrait
+ * and/or free-text reference (pasted text or an uploaded text file — a wiki
+ * article, a character sheet, freeform notes), flavored by the (optional) world.
+ * At least one source is required (enforced by the schema). Up to TWO stages so
+ * each model does what it's good at:
+ *  1) IF a portrait is given, a VISION model writes a short, free-text physical
+ *     description of the image (cheap + fast — no schema/grammar to slow it down);
+ *  2) the smarter MAIN model builds the full structured character from the portrait
+ *     description and/or the source text.
  * The image is read server-side from the controlled uploads dir and base64-encoded
  * (it never goes through the browser→model path) and ONLY the vision model sees it.
- * Read-only: returns a server-bounded draft for the creator to review/edit; persists
- * nothing. Fails safe (typed StructuredResult) at either stage.
+ * The source text is untrusted reference DATA — never instructions (the guardrails
+ * harden against embedded prompt-injection). Read-only: returns a server-bounded
+ * draft for the creator to review/edit; persists nothing. Fails safe at any stage.
  */
-export async function generateCharacterFromImage(
-  input: GenerateCharacterFromImageInput,
+export async function generateCharacterFromSources(
+  input: GenerateCharacterFromSourcesInput,
 ): Promise<StructuredResult<CharacterTemplateDraft>> {
-  const data = GenerateCharacterFromImageInputSchema.parse(input);
-  const { buffer, mimeType } = readAssetFile(data.assetId); // throws notFound if the asset/file is gone
-  const imageDataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+  const data = GenerateCharacterFromSourcesInputSchema.parse(input);
   // World is optional CONTEXT — a missing/stale world simply yields a generic draft.
   const world = data.worldId ? worldsRepo.get(data.worldId) ?? null : null;
   // The world's existing cast, so the build stage makes a DISTINCT character (no dupes).
@@ -480,32 +671,39 @@ export async function generateCharacterFromImage(
 
   const settings = getLlmSettings();
 
-  // --- Stage 1: VISION model → a short physical description (free text). ---
-  // Routed to the configured vision model (falls back to the main model). Kept a
-  // plain chat call (no structured grammar) so it stays fast on a vision model.
-  const visionSettings = { ...settings, model: settings.visionModel.trim() || settings.model };
-  let description: string;
-  try {
-    const res = await getAdapter(visionSettings).chat({
-      messages: buildImageDescriptionMessages(imageDataUrl),
-      temperature: 0.3, // a factual description, not creative writing
-      maxTokens: 400,
-    });
-    description = stripThink(res.content).trim();
-  } catch (err) {
-    return { ok: false, error: `Vision description failed: ${(err as Error).message}`, attempts: 1 };
-  }
-  if (!description) {
-    return { ok: false, error: 'The vision model returned no description of the image.', attempts: 1 };
+  // --- Stage 1 (only if a portrait was supplied): VISION model → a short physical
+  // description (free text). Routed to the configured vision model (falls back to
+  // the main model). Kept a plain chat call (no structured grammar) so it stays
+  // fast on a vision model. The asset is read first so a bad id fails before any model call.
+  let description = '';
+  if (data.assetId) {
+    const { buffer, mimeType } = readAssetFile(data.assetId); // throws notFound if the asset/file is gone
+    const imageDataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+    const visionSettings = resolveLlmRole(settings, 'vision');
+    try {
+      const res = await getAdapter(visionSettings).chat({
+        messages: buildImageDescriptionMessages(imageDataUrl),
+        temperature: 0.3, // a factual description, not creative writing
+        // Headroom for a richer, more detailed description (the guardrails ask for
+        // 4-8 detailed sentences) — a tight cap here would clip mid-sentence.
+        maxTokens: 800,
+      });
+      description = stripThink(res.content).trim();
+    } catch (err) {
+      return { ok: false, error: `Vision description failed: ${(err as Error).message}`, attempts: 1 };
+    }
+    if (!description) {
+      return { ok: false, error: 'The vision model returned no description of the image.', attempts: 1 };
+    }
   }
 
   // --- Stage 2: MAIN model → the full structured character draft (from text). ---
   const result = await callStructuredLlm(
     CharacterTemplateGenerationSchema,
-    buildCharacterFromDescriptionMessages({ world, description, existingCharacters }),
+    buildCharacterFromSourcesMessages({ world, description, sourceText: data.sourceText, existingCharacters }),
     {
       settings,
-      task: 'Design a complete dating-sim character draft from a portrait description, fitting the world.',
+      task: 'Design a complete dating-sim character draft from a portrait and/or text reference, fitting the world.',
       schemaName: 'CharacterTemplateGeneration',
       // The template is a large object; give it generous headroom over the chat default.
       maxTokens: Math.max(settings.maxTokens, 3000),
@@ -515,6 +713,17 @@ export async function generateCharacterFromImage(
     return { ok: false, error: result.error, attempts: result.attempts, lastRaw: result.lastRaw };
   }
   return { ok: true, data: boundGeneratedTemplate(result.data), attempts: result.attempts };
+}
+
+/**
+ * Portrait-only character generation — a thin wrapper over the unified
+ * {@link generateCharacterFromSources} kept for the existing image-only callers.
+ */
+export async function generateCharacterFromImage(
+  input: GenerateCharacterFromImageInput,
+): Promise<StructuredResult<CharacterTemplateDraft>> {
+  const data = GenerateCharacterFromImageInputSchema.parse(input);
+  return generateCharacterFromSources({ assetId: data.assetId, worldId: data.worldId, sourceText: '' });
 }
 
 export function getCharacterBundle(id: string): CharacterBundle {

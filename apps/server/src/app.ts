@@ -10,6 +10,8 @@ import { config, ensureDirectories } from './config';
 import { AppError } from './lib/errors';
 import { healthRoutes } from './routes/health';
 import { settingsRoutes } from './routes/settings';
+import { promptRoutes } from './routes/prompts';
+import { hydratePromptOverrides } from './services/prompt-override-service';
 import { worldRoutes } from './routes/worlds';
 import { characterRoutes } from './routes/characters';
 import { assetRoutes } from './routes/assets';
@@ -21,16 +23,24 @@ import { gamblingRoutes } from './routes/gambling';
 import { minigameRoutes } from './routes/minigames';
 import { playerRoutes } from './routes/player';
 import { dataRoutes } from './routes/data';
+import { packRoutes } from './routes/packs';
+import { benchRoutes } from './routes/bench';
 import { phoneRoutes } from './routes/phone';
 import { activityRoutes } from './routes/activities';
 import './services/phone-bootstrap'; // registers world-clock → phone lifecycle hooks
 
 export interface BuildAppOptions {
   logger?: boolean;
+  /** Register @fastify/swagger before routes so the docs generator can read them. */
+  withSwagger?: boolean;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   ensureDirectories();
+
+  // Load any installation-local prompt overrides into the registry cache so the
+  // very first prompt the game builds already reflects the player's customizations.
+  hydratePromptOverrides();
 
   const app = Fastify({
     logger: options.logger ?? true,
@@ -78,6 +88,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       reply.code(400).send({ error: 'Validation failed.', details: err.flatten() });
       return;
     }
+    // Fastify/AJV schema validation failures (from route `schema` options) —
+    // normalise to the same shape the manual parseInput() path returns.
+    const validation = (err as { validation?: unknown }).validation;
+    if (validation) {
+      reply.code(400).send({ error: 'Validation failed.', details: validation });
+      return;
+    }
     const statusCode = typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
       ? err.statusCode
       : 500;
@@ -85,10 +102,25 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     reply.code(statusCode).send({ error: err.message || 'Internal server error.' });
   });
 
+  if (options.withSwagger) {
+    const { default: fastifySwagger } = await import('@fastify/swagger');
+    await app.register(fastifySwagger, {
+      openapi: {
+        info: {
+          title: 'DSim API',
+          description: 'Local-first LLM-powered dating simulator — HTTP API.',
+          version: '0.1.0',
+        },
+        servers: [{ url: `http://${config.host}:${config.port}` }],
+      },
+    });
+  }
+
   await app.register(
     async (api) => {
       await healthRoutes(api);
       await settingsRoutes(api);
+      await promptRoutes(api);
       await worldRoutes(api);
       await characterRoutes(api);
       await assetRoutes(api);
@@ -102,6 +134,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       await phoneRoutes(api);
       await activityRoutes(api);
       await dataRoutes(api);
+      await packRoutes(api);
+      await benchRoutes(api);
     },
     { prefix: '/api' },
   );

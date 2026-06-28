@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { MIN_CHARACTER_AGE, GUARDEDNESS_DEFAULT, GAMBLING } from '../constants';
+import { MIN_CHARACTER_AGE, GUARDEDNESS_DEFAULT, GAMBLING, GEN_TEXT } from '../constants';
 import { CasinoGameSchema } from '../gambling';
 import { DatingStatsSchema, RelationshipStatsSchema, RelationshipStatKeySchema } from '../stats';
 import { PhaseSchema } from '../time';
-import { RelationshipStyleSchema, CharacterLinkSchema, EmploymentSchema, GenderSchema, SexualitySchema } from '../social';
+import { RelationshipStyleSchema, CharacterLinkSchema, EmploymentSchema, GenderSchema, SexualitySchema, RomanceStateSchema } from '../social';
 import { PropertyCategorySchema, StockSectorSchema, RentCadenceSchema } from '../wealth';
 import { MemoryTagArraySchema } from '../vocab';
 import { ItemEffectSchema, ItemRaritySchema, ItemCategorySchema } from './items';
@@ -228,6 +228,13 @@ export type Relationship = z.infer<typeof RelationshipSchema>;
 
 // --- Player -----------------------------------------------------------------
 
+/** One job-skill's stored progress on the player (see shared `career.ts`). */
+export const CareerSkillEntrySchema = z.object({
+  xp: z.number().int().nonnegative().default(0),
+  level: z.number().int().min(0).default(0),
+});
+export type CareerSkillEntry = z.infer<typeof CareerSkillEntrySchema>;
+
 export const PlayerProfileSchema = z.object({
   id,
   name: z.string().min(1).default('Player'),
@@ -238,6 +245,9 @@ export const PlayerProfileSchema = z.object({
   sexuality: SexualitySchema.default('unspecified'),
   personaNotes: z.string().default(''),
   money: z.number().int().nonnegative().default(0),
+  /** Per-world job mastery, keyed by career skill id. Server-authoritative — only the
+   *  work/minigame resolvers write it (never client-supplied via PlayerUpdate). */
+  career: z.record(z.string(), CareerSkillEntrySchema).default({}),
   createdAt: ts,
   updatedAt: ts,
 });
@@ -597,6 +607,12 @@ export const NpcEdgeSchema = z.object({
   lastDay: z.number().int().min(0).default(0),
   /** True once a friend edge has been minted from sustained meetings. */
   promoted: z.boolean().default(false),
+  /** Emergent romance state ('none'|'crush'|'together') the world-sim grew here. */
+  romanceState: RomanceStateSchema.default('none'),
+  /** In-world day the current romance state was reached (idempotency / recency). */
+  romanceSince: z.number().int().min(0).default(0),
+  /** True once a fall-out has demoted this edge to a rivalry (the cooling mirror of `promoted`). */
+  soured: z.boolean().default(false),
 });
 export type NpcEdge = z.infer<typeof NpcEdgeSchema>;
 
@@ -712,7 +728,7 @@ export const ChronicleLineSchema = z.object({
   mode: ConversationModeSchema,
   // Holds the evaluator's summaryLine verbatim — keep in sync with
   // SessionEvaluationSchema.summaryLine (llm.ts) and the slice in chronicle-service.
-  line: z.string().max(600),
+  line: z.string().max(GEN_TEXT.line),
 });
 export type ChronicleLine = z.infer<typeof ChronicleLineSchema>;
 
@@ -750,7 +766,7 @@ export type CharacterEnding = z.infer<typeof CharacterEndingSchema>;
  *  (the player-facing beats) and the world-sim ("around town"). */
 export const DayRecordBeatSchema = z.object({
   icon: z.string().max(8).default('•'),
-  text: z.string().min(1).max(280),
+  text: z.string().min(1).max(GEN_TEXT.line),
   tone: z.enum(['good', 'bad', 'neutral']).default('neutral'),
 });
 export type DayRecordBeat = z.infer<typeof DayRecordBeatSchema>;
@@ -768,7 +784,7 @@ export const DayRecordSchema = z.object({
   day: z.number().int().positive(),
   headline: z.string().default(''),
   narrative: z.string().default(''),
-  highlights: z.array(z.string().max(280)).default([]),
+  highlights: z.array(z.string().max(GEN_TEXT.line)).default([]),
   beats: z.array(DayRecordBeatSchema).default([]),
   /** Passive daily income credited as this day began. */
   income: z.number().int().nonnegative().default(0),

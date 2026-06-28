@@ -10,6 +10,7 @@ import {
   claimTextGift,
   deliverDueTexts,
   getOrCreateThread,
+  retryPlayerTextReply,
   sendPlayerText,
 } from './text-message-service';
 import { createShopItem, grantItem } from './shop-service';
@@ -241,5 +242,76 @@ describe('player texting', () => {
     expect(res.relationshipDelta.affection ?? 0).toBeLessThan(0);
     expect(after.affection).toBeLessThan(before.affection);
     expect(after.tension).toBeGreaterThan(before.tension);
+  });
+
+  it('retry regenerates a failed reply without duplicating the player text', async () => {
+    const { character } = seedWorldAndCharacter();
+    dateOnce(character.id);
+    // The first send saves the player's text, but the model returns unparseable
+    // JSON on every attempt → the reply fails (error set, reply null).
+    setAdapterOverride(new ScriptedAdapter(['not json at all']));
+    const first = await sendPlayerText(character.id, 'are you around?');
+    expect(first.reply).toBeNull();
+    expect(first.error).toBeTruthy();
+
+    // Retry with a healthy model: the reply lands, and the player's text is NOT
+    // re-inserted (exactly one player message in the thread).
+    setAdapterOverride(
+      new ScriptedAdapter([
+        JSON.stringify({ body: 'yeah! what’s up?', tone: 'warm' }),
+        JSON.stringify({ engagement: 1, hostile: false, note: 'friendly' }),
+      ]),
+    );
+    const retry = await retryPlayerTextReply(character.id);
+    expect(retry.reply?.body).toBe('yeah! what’s up?');
+    expect(retry.error).toBeNull();
+
+    const thread = threadsRepo.getByCharacter(character.id, DEFAULT_PLAYER_ID)!;
+    const msgs = textMessagesRepo.listDeliveredByThread(thread.id);
+    expect(msgs.filter((m) => m.sender === 'player').length).toBe(1);
+    expect(msgs[msgs.length - 1]!.sender).toBe('character');
+  });
+
+  it('two concurrent retries produce exactly one reply (no duplicate, no double-applied delta)', async () => {
+    const { character } = seedWorldAndCharacter();
+    dateOnce(character.id);
+    // Save an unanswered player text (the reply fails on unparseable JSON).
+    setAdapterOverride(new ScriptedAdapter(['not json at all']));
+    await sendPlayerText(character.id, 'are you around?');
+
+    // Heal the model and fire two retries at once. The per-character lock must
+    // serialize them: the first generates the reply; the second re-reads, sees the
+    // reply already there, and no-ops (so the judge delta is applied only once).
+    setAdapterOverride(
+      new ScriptedAdapter([
+        JSON.stringify({ body: 'hey! yeah, what’s up?', tone: 'warm' }),
+        JSON.stringify({ engagement: 2, hostile: false, note: 'warm' }),
+      ]),
+    );
+    await Promise.all([retryPlayerTextReply(character.id), retryPlayerTextReply(character.id)]);
+
+    const thread = threadsRepo.getByCharacter(character.id, DEFAULT_PLAYER_ID)!;
+    const msgs = textMessagesRepo.listDeliveredByThread(thread.id);
+    expect(msgs.filter((m) => m.sender === 'player').length).toBe(1);
+    expect(msgs.filter((m) => m.sender === 'character').length).toBe(1);
+  });
+
+  it('retry is a no-op that returns the existing reply when one is already there', async () => {
+    const { character } = seedWorldAndCharacter();
+    dateOnce(character.id);
+    setAdapterOverride(
+      new ScriptedAdapter([
+        JSON.stringify({ body: 'sure, sounds good', tone: 'warm' }),
+        JSON.stringify({ engagement: 1, hostile: false, note: 'friendly' }),
+      ]),
+    );
+    await sendPlayerText(character.id, 'wanna hang out?');
+    const thread = threadsRepo.getByCharacter(character.id, DEFAULT_PLAYER_ID)!;
+    const countBefore = textMessagesRepo.listDeliveredByThread(thread.id).length;
+
+    const retry = await retryPlayerTextReply(character.id);
+    expect(retry.reply?.body).toBe('sure, sounds good');
+    // Nothing new written — the last message already was a reply.
+    expect(textMessagesRepo.listDeliveredByThread(thread.id).length).toBe(countBefore);
   });
 });

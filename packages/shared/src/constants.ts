@@ -8,13 +8,38 @@ export const MIN_CHARACTER_AGE = 18;
 /** The default single-player profile id. This app models one player. */
 export const DEFAULT_PLAYER_ID = 'player-default';
 
-/** Starting money for a fresh player profile. */
-export const DEFAULT_STARTING_MONEY = 250;
+/** Starting money for a fresh player profile. Zero by design — money is something
+ *  you EARN (work shifts, minigames, wealth-system yield), never handed out. */
+export const DEFAULT_STARTING_MONEY = 0;
 
-/** Passive money credited to a world's wallet each time its day advances (Sleep).
- *  Deliberately small — a token trickle so you're never fully stranded, while the
- *  real income comes from work shifts and minigames (the stamina-vs-cash tradeoff). */
-export const DAILY_INCOME = 15;
+/**
+ * Generous, centralized character-length tiers for free-text fields — both the ones
+ * the LLM GENERATES (profiles, world lore, descriptions, prose) and the ones a USER
+ * TYPES as generation input (world info, prompts, themes).
+ *
+ * These caps are NOT meant to shape output length (the prompts do that) — they exist
+ * only to bound a runaway/looping model so a degenerate repeat is REJECTED by
+ * validation rather than accepted. They are set far above any natural output, so real
+ * content is never clipped. (The structured caller strips `maxLength` from the GRAMMAR
+ * — see `structured.ts` — so the model is never hard-truncated mid-word; an over-long
+ * loop instead fails the Zod `.max()` here and is retried, never stored.)
+ *
+ * Tune the whole app's field sizes here.
+ */
+export const GEN_TEXT = {
+  /** Names, titles, tags, single labels, short one-phrase list items. */
+  label: 200,
+  /** One/two-line outputs: spoken & texted lines, social posts/comments, headlines,
+   *  short descriptions, quiz/news bodies, facts. */
+  line: 2_000,
+  /** Short paragraphs: longer descriptions, recap narrative, email bodies, room
+   *  descriptions, rolling summaries, short-bios. */
+  blurb: 8_000,
+  /** Rich, multi-paragraph fields: personality, appearance, speech/texting style,
+   *  online persona, world summary/lore/rules/notes, epilogues, and the prompts /
+   *  world-context a creator types to drive generation. */
+  prose: 24_000,
+} as const;
 
 /** Prompt-builder budget approximations (rough char-based, not real tokens). */
 export const PROMPT_LIMITS = {
@@ -27,9 +52,10 @@ export const PROMPT_LIMITS = {
   /** Trigger a rolling summary once a session exceeds this many messages. */
   summarizeEveryMessages: 24,
   /** Soft char cap for the cross-date chronicle injected into prompts. Kept at
-   * or above the chronicle's hard ceiling so a complete narrative is never
-   * re-truncated mid-sentence when fed back into a prompt. */
-  chronicleChars: 5000,
+   * or above the chronicle's hard ceiling (ChronicleSchema.chronicle = GEN_TEXT.blurb)
+   * so a complete narrative is never re-truncated mid-sentence when fed back into a
+   * prompt. */
+  chronicleChars: GEN_TEXT.blurb,
 } as const;
 
 /** Fold the chronicle (compress recent date-lines into the narrative) every N dates. */
@@ -89,13 +115,21 @@ export const LAST_SEEN_FLAG = 'lastSeenDay';
  *  — which resets lastSeen to keep the neglect clock warm — can't suppress the
  *  "it's been a while since we spent time together" beat. */
 export const LAST_DATE_FLAG = 'lastDateDay';
+/** Relationship-flag keys that carry the emotional register of the LAST date — the
+ *  evaluator's mood word plus the world-day it was captured — so a character's texts
+ *  briefly honor how the night left them feeling (a heavy date shouldn't be followed
+ *  by a breezy joke the next morning). The day stamp is self-contained (NOT reused
+ *  from lastSeen/lastDate, which activities also bump) so the afterglow tracks the
+ *  date itself and fades on its own clock. See DATE_AFTERGLOW_DAYS. */
+export const AFTERGLOW_MOOD_FLAG = 'afterglow:mood';
+export const AFTERGLOW_DAY_FLAG = 'afterglow:day';
 
 // --- Phone (Messages / Email) -----------------------------------------------
 
-/** Max length of a player-sent text. */
-export const TEXT_MAX_LEN = 1000;
-/** Max length of a character's text bubble. */
-export const TEXT_BUBBLE_MAX = 280;
+/** Max length of a player-sent text. Roomy — only a runaway guard, not a target. */
+export const TEXT_MAX_LEN = GEN_TEXT.line;
+/** Max length of a character's text bubble. Roomy — only a runaway guard, not a target. */
+export const TEXT_BUBBLE_MAX = GEN_TEXT.line;
 /** Max daily texts a single character may send. */
 export const DAILY_TEXTS_MAX = 3;
 /** Days unseen before a character's daily text turns "forlorn" (missing you). */
@@ -111,6 +145,10 @@ export const DAILY_TEXT_CHANCE = 0.4;
 export const FORLORN_TEXT_CHANCE = 0.25;
 /** A daily text is scheduled to ONE of these phases — never the afternoon. */
 export const DAILY_TEXT_PHASES = ['morning', 'evening', 'night'] as const;
+/** How many in-world days a date's emotional register keeps coloring the character's
+ *  texts afterward. 1 = the date day and the day after honor it; from day 2 on it has
+ *  faded, so they don't keep harping on the last date many days later. */
+export const DATE_AFTERGLOW_DAYS = 1;
 
 /** Chance that ANY in-world emails arrive on a given day. Most days: none. */
 export const EMAIL_DAY_CHANCE = 0.25;
@@ -235,6 +273,26 @@ export const GAMBLING = {
   /** Blackjack pays 3:2 on a natural (numerator/denominator of the bonus). */
   BLACKJACK_NUMERATOR: 3,
   BLACKJACK_DENOMINATOR: 2,
+} as const;
+
+// --- Career / job skills ----------------------------------------------------
+
+/**
+ * Tunables for the work-system's per-world job mastery (see `career.ts`). A job
+ * grants XP to its skill; the skill level scales that job's pay via masteryMult.
+ * Progression is deliberately FLAT-capped (never scales with wealth) so leveling
+ * speeds the grind but can't runaway-inflate — the 3-action stamina budget stays
+ * the real throttle, and `ABSOLUTE_MAX_PAY` caps any single shift.
+ */
+export const CAREER = {
+  /** Highest level any skill can reach. */
+  MAX_LEVEL: 5,
+  /** Pay multiplier per level: 1 + STEP·level (L0 = 1.0 … L5 = 1.75). */
+  MASTERY_STEP: 0.15,
+  /** Base of the cumulative XP curve: xpToReach(L) = XP_BASE·L·(L+1)/2 (L1=100 … L5=1500). */
+  XP_BASE: 100,
+  /** Flat, wealth-independent ceiling on any single work shift's pay (post-mastery). */
+  ABSOLUTE_MAX_PAY: 250,
 } as const;
 
 // --- Availability (Do Not Disturb) ------------------------------------------

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import './phone-comms.css';
 import type { Email } from '@dsim/shared';
 import { api } from '../../lib/api';
 import { errorMessage } from '../../lib/hooks';
 import { useAppData } from '../../state/app-context';
-import { useT, type TFunc } from '../../i18n';
 import { Icon } from '../Icon';
 import { PhoneAppBar } from './PhoneAppBar';
 import { Banner, Spinner } from '../ui';
@@ -13,16 +13,18 @@ function senderInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || '?';
 }
 
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
+
 /** Show "Day N" when available; fall back to a short date from the timestamp. */
-function emailWhen(e: Email, t: TFunc): string | null {
-  if (e.dayNumber != null) return t('dash.hud.day', { day: e.dayNumber });
+function emailWhen(e: Email, t: TFn, lang: string): string | null {
+  if (e.dayNumber != null) return t('email.day', { day: e.dayNumber });
   const ts = e.deliveredAt ?? e.createdAt;
   if (!ts) return null;
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return new Date(ts).toLocaleDateString(lang, { month: 'short', day: 'numeric' });
 }
 
 export function EmailApp() {
-  const t = useT();
+  const { t, i18n } = useTranslation(['phone', 'common']);
   const { activeWorldId, dayTick } = useAppData();
   const [emails, setEmails] = useState<Email[]>([]);
   const [open, setOpen] = useState<Email | null>(null);
@@ -57,16 +59,17 @@ export function EmailApp() {
     }
   };
 
+  const tw = t as unknown as TFn;
   if (open) {
-    const when = emailWhen(open, t);
+    const when = emailWhen(open, tw, i18n.language);
     return (
       <div className="phone-app">
         <PhoneAppBar
           title={open.senderName}
-          kicker={t('phone.mail.reading')}
+          kicker={t('email.reading')}
           icon="mail"
           left={
-            <button className="btn sm ghost pbar-iconbtn" onClick={() => setOpen(null)} aria-label={t('phone.mail.backInbox')} title={t('phone.mail.inbox')}>
+            <button className="btn sm ghost pbar-iconbtn" onClick={() => setOpen(null)} aria-label={t('email.backToInbox')} title={t('email.inboxShort')}>
               <Icon name="chevronDown" size={18} />
             </button>
           }
@@ -90,12 +93,14 @@ export function EmailApp() {
   return (
     <div className="phone-app">
       <PhoneAppBar
-        title={t('phone.mail.inbox')}
-        kicker={t('phone.app.mail')}
+        title={t('email.inbox')}
+        kicker={t('email.mail')}
         icon="mail"
         right={
-          <button className="btn sm ghost pbar-iconbtn" onClick={load} aria-label={t('common.refresh')} title={t('common.refresh')}>
-            <Icon name="refresh" size={18} />
+          <button className="btn sm ghost pbar-iconbtn" onClick={load} disabled={loading} aria-label={t('email.refresh')} title={t('email.refresh')}>
+            <span className={loading ? 'is-spinning' : undefined}>
+              <Icon name="refresh" size={18} />
+            </span>
           </button>
         }
       />
@@ -105,13 +110,13 @@ export function EmailApp() {
       ) : emails.length === 0 ? (
         <div className="pcom-empty">
           <span className="pcom-empty-icon"><Icon name="mail" size={32} /></span>
-          <span className="pcom-empty-title">{t('phone.mail.emptyTitle')}</span>
-          <p>{t('phone.mail.emptyBody')}</p>
+          <span className="pcom-empty-title">{t('email.emptyTitle')}</span>
+          <p>{t('email.emptyBody')}</p>
         </div>
       ) : (
         <div className="pcom-rows">
           {emails.map((e) => {
-            const when = emailWhen(e, t);
+            const when = emailWhen(e, tw, i18n.language);
             return (
               <button
                 key={e.id}

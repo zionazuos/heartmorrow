@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
+import type { ParseKeys } from 'i18next';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAppData } from './state/app-context';
-import { useT } from './i18n';
-import type { MessageKey } from './i18n/locales/en';
 import { DayHud } from './components/DayHud';
 import { Icon, type IconName } from './components/Icon';
 import { Dashboard } from './pages/Dashboard';
@@ -10,30 +10,36 @@ import { Characters } from './pages/Characters';
 import { CharacterProfile } from './pages/CharacterProfile';
 import { CharacterEditor } from './pages/CharacterEditor';
 import { WorldEditor } from './pages/WorldEditor';
-import { WorldSelector, WorldOnboarding } from './pages/WorldSelector';
+import { WorldSelector, WorldOnboarding, WorldSelectorSettings } from './pages/WorldSelector';
 import { Chat } from './pages/Chat';
 import { Shop } from './pages/Shop';
 import { Inventory } from './pages/Inventory';
 import { Minigames } from './pages/Minigames';
 import { Phone } from './pages/Phone';
 import { Settings } from './pages/Settings';
+import { Help } from './pages/Help';
+import { Bench } from './pages/Bench';
+import { PromptEditor } from './pages/PromptEditor';
 import { Debug } from './pages/Debug';
+import { APP_VERSION, DISCORD_URL, GITHUB_URL, GIT_COMMIT } from './version';
 
-// `short` is the label used by the cramped bottom nav (phones); the roomy
-// sidebar always shows the full `label`. Only set it where the full label is
+// `shortKey` is the label used by the cramped bottom nav (phones); the roomy
+// sidebar always shows the full `labelKey`. Only set it where the full label is
 // long enough to risk overflowing an evenly-flexed bottom-nav cell.
-// `label`/`short` are message keys resolved through `t()` at render time so the
-// nav follows the active language. `short` is the label used by the cramped
-// bottom nav (phones); the roomy sidebar always shows the full `label`.
-const NAV: { to: string; icon: IconName; label: MessageKey; short?: MessageKey; end?: boolean; creatorOnly?: boolean }[] = [
-  { to: '/', icon: 'home', label: 'nav.home', end: true },
-  { to: '/characters', icon: 'people', label: 'nav.people' },
-  { to: '/world', icon: 'chronicle', label: 'nav.world', creatorOnly: true },
-  { to: '/chat', icon: 'date', label: 'nav.date' },
-  { to: '/phone', icon: 'phone', label: 'nav.phone' },
-  { to: '/settings', icon: 'settings', label: 'nav.settings' },
-  { to: '/worlds', icon: 'worlds', label: 'nav.switchWorld', short: 'nav.worldsShort' },
-  { to: '/debug', icon: 'debug', label: 'nav.debug', creatorOnly: true },
+type CommonKey = ParseKeys<'common'>;
+// `hideOnBottomNav` keeps an item out of the cramped mobile bottom bar (which must
+// stay fully on-screen, no scroll) while still showing it in the roomy sidebar.
+// Help lives there: desktop gets a permanent tab; mobile reaches it via Settings.
+const NAV: { to: string; icon: IconName; labelKey: CommonKey; shortKey?: CommonKey; end?: boolean; creatorOnly?: boolean; hideOnBottomNav?: boolean }[] = [
+  { to: '/', icon: 'home', labelKey: 'nav.home', end: true },
+  { to: '/characters', icon: 'people', labelKey: 'nav.people' },
+  { to: '/world', icon: 'chronicle', labelKey: 'nav.world', creatorOnly: true },
+  { to: '/chat', icon: 'date', labelKey: 'nav.date' },
+  { to: '/phone', icon: 'phone', labelKey: 'nav.phone' },
+  { to: '/settings', icon: 'settings', labelKey: 'nav.settings' },
+  { to: '/help', icon: 'info', labelKey: 'nav.help', hideOnBottomNav: true },
+  { to: '/worlds', icon: 'worlds', labelKey: 'nav.switchWorld', shortKey: 'nav.worldsShort' },
+  { to: '/debug', icon: 'debug', labelKey: 'nav.debug', creatorOnly: true },
 ];
 
 /** A short, stable key for the current screen — drives the per-screen wallpaper. */
@@ -47,6 +53,9 @@ function routeKey(path: string): string {
   if (path.startsWith('/inventory')) return 'bag';
   if (path.startsWith('/minigames')) return 'games';
   if (path.startsWith('/settings')) return 'settings';
+  if (path.startsWith('/help')) return 'settings';
+  if (path.startsWith('/bench')) return 'settings';
+  if (path.startsWith('/prompts')) return 'settings';
   if (path.startsWith('/world')) return 'world';
   if (path.startsWith('/debug')) return 'debug';
   return 'home';
@@ -59,9 +68,9 @@ function CreatorRoute({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const { creatorMode, unreadTexts, activeWorldId, activeDate } = useAppData();
   const location = useLocation();
-  const t = useT();
 
   // The world selector + onboarding are a full-screen experience OUTSIDE the
   // in-world shell — you haven't "entered" a world yet, so there's no sidebar/HUD.
@@ -70,6 +79,7 @@ export default function App() {
       <Routes>
         <Route path="/worlds" element={<WorldSelector />} />
         <Route path="/worlds/new" element={<WorldOnboarding />} />
+        <Route path="/worlds/settings" element={<WorldSelectorSettings />} />
         <Route path="*" element={<Navigate to="/worlds" replace />} />
       </Routes>
     );
@@ -91,8 +101,8 @@ export default function App() {
       return (
         <span
           className="nav-badge nav-badge-live"
-          title={t('app.dateInProgress.title', { name: activeDate.characterName })}
-          aria-label={t('app.dateInProgress.label', { name: activeDate.characterName })}
+          title={t('hud.onDateWith', { name: activeDate.characterName })}
+          aria-label={t('hud.dateInProgress', { name: activeDate.characterName })}
         />
       );
     return null;
@@ -111,11 +121,47 @@ export default function App() {
             {nav.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? 'active' : '')}>
                 <span className="ico"><Icon name={n.icon} size={20} /></span>
-                {t(n.label)}
+                {t(n.labelKey)}
                 {badgeFor(n.to)}
               </NavLink>
             ))}
           </nav>
+
+          {/* Pinned to the bottom of the column: a way out to support/updates,
+              plus the exact build so bug reports can name a version. On phones the
+              sidebar is hidden, so the same link lives in Help → Support instead. */}
+          <div className="sidebar-foot">
+            <a
+              className="support-link discord-link"
+              href={DISCORD_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <span className="ico"><Icon name="discord" size={18} /></span>
+              <span className="support-link-text">
+                {t('support.discord')}
+                <small>{t('support.discordHint')}</small>
+              </span>
+            </a>
+            <a
+              className="support-link github-link"
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <span className="ico"><Icon name="github" size={18} /></span>
+              <span className="support-link-text">
+                {t('support.github')}
+                <small>{t('support.githubHint')}</small>
+              </span>
+            </a>
+            <div
+              className="app-version"
+              title={t('support.versionTitle', { version: APP_VERSION, commit: GIT_COMMIT })}
+            >
+              Heartmorrow {APP_VERSION} <span className="commit">({GIT_COMMIT})</span>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -140,16 +186,19 @@ export default function App() {
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/minigames" element={<Minigames />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/help" element={<Help />} />
+          <Route path="/bench" element={<Bench />} />
+          <Route path="/prompts" element={<PromptEditor />} />
           <Route path="/debug" element={<CreatorRoute><Debug /></CreatorRoute>} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
       </main>
 
       <nav className="bottomnav">
-        {nav.map((n) => (
+        {nav.filter((n) => !n.hideOnBottomNav).map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ico"><Icon name={n.icon} size={20} /></span>
-            {t(n.short ?? n.label)}
+            {t(n.shortKey ?? n.labelKey)}
             {badgeFor(n.to)}
           </NavLink>
         ))}

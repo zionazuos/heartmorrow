@@ -1,0 +1,38 @@
+{
+  "title": "Settings",
+  "wallpaper": {
+    "head": "Phone wallpaper",
+    "hint": "Sets the background of your in-game phone. Language and accent color live in the main Settings menu.",
+    "scaling": "Scaling",
+    "fit": {
+      "fit": "Fit — whole image",
+      "fill": "Fill — crop to fill",
+      "stretch": "Stretch to fit",
+      "center": "Center — actual size",
+      "tile": "Tile"
+    }
+  },
+  "mode": {
+    "head": "Mode",
+    "hint": "Play mode hides creation/editing tools so you can just play. Creator mode shows them.",
+    "play": "Play mode",
+    "creator": "Creator mode"
+  },
+  "danger": {
+    "head": "Danger zone",
+    "hint": "Erase all progress and start fresh. Your created characters and worlds are kept.",
+    "reset": "Total reset (back to Day 1)",
+    "resetting": "Resetting…"
+  },
+  "reset": {
+    "kicker": "Danger zone",
+    "title": "Total reset",
+    "body": "Erase ALL progress (relationships, memories, texts, money, day) and start over at Day 1? Your created characters and worlds are kept.",
+    "confirm": "Reset everything"
+  },
+  "toast": {
+    "wallpaperTooLarge": "Image too large — pick one under 20 MB.",
+    "wallpaperSet": "Wallpaper set.",
+    "progressReset": "Progress reset. Back to Day 1."
+  }
+}
